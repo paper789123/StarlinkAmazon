@@ -544,7 +544,7 @@ Fetched automatically from the SIDRA API by `work_dataframe.Rmd` for January 201
 
 Step 6 alone reproduces every number in the paper from the included panels, so a reader who only wants the tables can skip steps 2, 4 and 5.
 
-Expect step 6 to take hours: the leave-one-microregion-out and leave-one-state-out sweeps re-estimate every outcome once per dropped unit and dominate the cost. Raise `robust_max_workers` near the top of the file if you have cores to spare; it defaults to 3.
+Step 6 took about 4 minutes on a 24-core, 64 GB Windows machine. The leave-one-out sweeps re-estimate every outcome once per dropped unit and run on up to 16 parallel workers (by default, one less than the machine's logical cores); set `STARLINK_ROBUST_MAX_WORKERS` to change that. Each worker needs about 110 MB, but the main R session peaks at about 14 GB, so allow roughly 16 GB of free memory.
 
 ## 4. Sample definition
 
