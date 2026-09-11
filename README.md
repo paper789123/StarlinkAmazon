@@ -12,7 +12,7 @@ code/work_dataframe.Rmd     raw provider files  ->  the two analysis panels
 code/starlink_results.Rmd   the panels          ->  every table and figure
 ```
 
-The selected specification in `code/starlink_results.Rmd` includes GEO subscriptions and Copernicus ERA5-Drought SPEI-12. The panel-construction script calls `code/spei_copernicus_era5.R` to create the December/calendar and July/PRODES-year municipal anchors. The results script sources `code/figure1_map.R` for the vertical 2022/2024 map.
+The selected specification in `code/starlink_results.Rmd` includes GEO subscriptions and Copernicus ERA5-Drought SPEI-12. The panel-construction script calls `code/spei_copernicus_era5.R` to create the December/calendar and July/PRODES-year municipal anchors. The vertical 2022/2024 map is built inline in the results script.
 
 Both resolve every path relative to their own folder, so the package can sit anywhere. Two settings near the top of `work_dataframe.Rmd` control where data is read from and written to:
 
@@ -35,27 +35,28 @@ Run each script from the folder that contains it. Both stop with a clear message
 
 ```
 code/
-  work_dataframe.Rmd
-  starlink_results.Rmd
-  starlink_results_b.Rmd
-  spei_copernicus_era5.R
-  figure1_map.R
-  archive/spei_tests_2026-09-01/  exploratory four-way SPEI comparison
+  work_dataframe.Rmd         raw provider files -> the two analysis panels
+  starlink_results.Rmd       the panels -> every table and figure
+  starlink_results.html      rendered output, read it without running anything
+  spei_copernicus_era5.R     called by work_dataframe.Rmd for the SPEI anchors
 data/
   dataset_normalyr.RDS       calendar panel, Jan 2022 - Dec 2024      committed
-  dataset_prodesyr.RDS       compact native-PRODES panel, 2017-2025 committed
+  dataset_prodesyr.RDS       compact native-PRODES panel, 2017-2025   committed
   cmdty_price_monthly.RDS    commodity price series                   committed
-  cmdty_price_anonormal.RDS                                           committed
+  cmdty_price_anonormal.RDS  annual commodity price averages          committed
   ipca_mensal_sidra.csv      IPCA deflator (IBGE SIDRA table 1737)    committed
+  prodes_source.txt          PRODES vintage note                      committed
   raw/                       provider downloads, one folder each      not committed
-    FBSP/amazon_factions_2023_2024.csv                                committed
-  processed/                 pipeline intermediates, normally not committed
-    figure1_deter_2022_2024.RDS  legacy DETER polygons used in Figure 1
-    figure1_mobile_coverage.RDS  mobile-coverage geometry used in Figure 1
-    mun_zone.RDS                 panel-matched 772-unit map geometry
-    starlink_normalyr.RDS        municipal Starlink rates
-manuscript/
-  main.tex, main.pdf, cas-sc style files, figs/, tables/
+    FBSP/amazon_factions_2023_2024.csv  hand-coded, not downloadable  committed
+  processed/                 pipeline intermediates, rebuilt by work_dataframe.Rmd
+    figure1_deter_2022_2024.RDS         DETER polygons for Figure 1   committed
+    figure1_mobile_coverage.RDS         mobile-coverage geometry      committed
+    figure_ax_deter_fire_2021_2024.RDS  DETER fire scars, appendix    committed
+    mun_zone.RDS                        772-unit map geometry         committed
+    spei12_copernicus_era5_normalyr.RDS SPEI-12, calendar year        committed
+    spei12_copernicus_era5_prodesyr.RDS SPEI-12, PRODES year          committed
+    starlink_normalyr.RDS               municipal Starlink rates      committed
+    everything else                                                   not committed
 ```
 
 Raw downloads go under `data/raw/<PROVIDER>/`, one folder per provider, named exactly as in section 2. After downloading, `data/raw/` looks like:
