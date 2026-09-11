@@ -16,21 +16,18 @@ manuscript/
 
 # --- data ------------------------------------------------------------------
 # Default-deny, then re-include exactly what code/starlink_results.Rmd reads:
-# the two panels, the commodity prices it joins at estimation time, and the
-# geometry for the maps. Also kept: the IPCA cache that pins the deflator
-# vintage, and the hand-coded FBSP file, which cannot be downloaded.
+# the two self-contained panels and the reusable geometry for the maps. Raw
+# provider files and pipeline intermediates, including cmdty_price_*.RDS, stay
+# ignored except for the hand-coded FBSP file and the INCRA archive whose source
+# requires authenticated gov.br access.
 data/*
-!data/cmdty_price_anonormal.RDS
-!data/cmdty_price_monthly.RDS
 !data/dataset_normalyr.RDS
 !data/dataset_prodesyr.RDS
-!data/ipca_mensal_sidra.csv
 
 !data/processed/
 data/processed/*
-!data/processed/figure1_deter_2022_2024.RDS
-!data/processed/figure1_mobile_coverage.RDS
-!data/processed/figure_ax_deter_fire_2021_2024.RDS
+!data/processed/deter_map.RDS
+!data/processed/mobile_coverage_2021.RDS
 !data/processed/mun_zone.RDS
 
 # Hand-coded from the Cartografias reports; not a provider download.
@@ -39,6 +36,11 @@ data/raw/*
 !data/raw/FBSP/
 data/raw/FBSP/*
 !data/raw/FBSP/amazon_factions_2023_2024.csv
+
+# Included so referees do not need a Brazilian gov.br login.
+!data/raw/INCRA/
+data/raw/INCRA/*
+!data/raw/INCRA/Assentamento Brasil.zip
 
 # --- code ------------------------------------------------------------------
 code/Rplots.pdf

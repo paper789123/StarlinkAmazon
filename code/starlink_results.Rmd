@@ -152,55 +152,16 @@ message(paste(
   "Copernicus ERA5-Drought SPEI-12"
 ))
 
-# Municipal polygons for the variance-share map. This is the submission-built,
-# panel-matched 772-unit geometry, including the Santarem--Mojui merge.
+# Municipal polygons for all maps. This is the submission-built, panel-matched
+# 772-unit geometry, including the Santarem--Mojui merge.
 mun_legal_amazon_geometry = paste0(DATA_DIR, "processed/mun_zone.RDS")
 
 panel_end_year = 2025L
 stopifnot(PRODES_END_YEAR <= panel_end_year)
 
-# The upstream pipeline stores the commodity-price RDS files directly in
-# December 2024 BRL, so no render-time rebasing is required.
-
-# ── Lagged agricultural-price controls ────────────────────────────────────────
-# Following the price-control functional form used by Assuncao et al. (2023),
-# interact lagged national real price LEVELS with fixed municipal agronomic
-# suitability. The function stores the two raw lagged price series; the product
-# with soy or pasture suitability is specified transparently with `:` in the
-# regression formula. These controls vary by year and receive no extra year interaction.
-add_lagged_price_controls = function(dat) {
-  prices_lagged = readRDS(paste0(panel_dir, "cmdty_price_monthly.RDS")) %>%
-    dplyr::filter(commodity %in% c("soy", "cattle")) %>%
-    dplyr::group_by(commodity, year) %>%
-    dplyr::summarise(price = mean(price, na.rm = TRUE), .groups = "drop") %>%
-    tidyr::pivot_wider(
-      names_from = commodity,
-      values_from = price,
-      names_prefix = ".price_"
-    ) %>%
-    dplyr::transmute(
-      .price_year = as.integer(year) + 1L,
-      .soy_price_lagged = .price_soy,
-      .cattle_price_lagged = .price_cattle
-    )
-
-  out = dat %>%
-    dplyr::mutate(.price_year = as.integer(as.character(year))) %>%
-    dplyr::left_join(prices_lagged, by = ".price_year") %>%
-    dplyr::mutate(
-      soy_price_lagged_level = .soy_price_lagged,
-      cattle_price_lagged_level = .cattle_price_lagged
-    )
-
-  stopifnot(!anyNA(out[c(
-    "soy_price_lagged_level", "cattle_price_lagged_level"
-  )]))
-
-  out %>%
-    dplyr::select(
-      -.price_year, -.soy_price_lagged, -.cattle_price_lagged
-    )
-}
+# Commodity prices are deflated to December 2024 BRL and merged into both final
+# panels by work_dataframe.Rmd. The regression interactions below therefore use
+# panel columns and require no separate price file at render time.
 
 # Both panels carry their SPEI-12 endpoint from code/work_dataframe.Rmd.
 # Calendar year t uses December t (January--December); PRODES year t uses July t
@@ -491,9 +452,6 @@ library(tidyverse)
 library(ggpubr)
 library(future.apply)
 
-
-# DETER filename (for creating figure)
-DETER_zip = "INPE/deter-amz-public-2026mar29.zip"
 
 # Function for turning first character to upper case
 first_upper = function(string) {
@@ -968,12 +926,12 @@ cover_outcomes = paste0(
 # operating-network kilometre count (about 2,902 km inside the Legal Amazon) and
 # is used directly as the eighth control's input.
 
-# .RDS, not .dta. The RDS retains the full names of the 99 required columns;
+# .RDS, not .dta. The RDS retains the full names of the 103 required columns;
 # Stata's 32-character limit requires abbreviations in the companion export.
 panel_path = paste0(panel_dir, "dataset_normalyr.RDS")
 dta = readRDS(panel_path)
-if (ncol(dta) != 99L) {
-  stop("dataset_normalyr.RDS must follow the compact 99-column contract")
+if (ncol(dta) != 103L) {
+  stop("dataset_normalyr.RDS must follow the compact 103-column contract")
 }
 if (!identical(attr(dta, "coordinate_basis"), "ibge_municipal_seat")) {
   stop("Rebuild the v3 panel: its coordinates and distances are not marked as IBGE-seat based")
@@ -988,9 +946,8 @@ dta = dta %>%
     stopifnot(dplyr::n_distinct(.$codmun) == 772)
     .
   } %>%
-  # Road surfaces, coordinates, CHIRTS-ERA5 Tmax, CHIRPS precipitation, and
-  # distances ship on the panel.
-  add_lagged_price_controls() %>%
+  # Road surfaces, coordinates, climate controls, distances, and real commodity
+  # prices ship on the panel.
   add_spei12_anchor("calendar") %>%
   add_pre2022_fire_scar_spei() %>%
   mutate(year = factor(year, levels = as.character(CAL_END_YEAR:2017))) %>%
@@ -1352,15 +1309,6 @@ vars = c(
 )
 
 
-# The descriptive table reports contemporaneous annual real prices. The model
-# continues to use the lagged price-suitability interactions defined above.
-desc_prices = readRDS(paste0(panel_dir, "cmdty_price_anonormal.RDS")) %>%
-  dplyr::transmute(
-    desc_year = as.integer(year),
-    soy_price_current = price_soy,
-    cattle_price_current = price_cattle
-  )
-
 # function to format mean ± sd
 fmt = function(x, digits = 2) {
   if (all(is.na(x))) {
@@ -1381,9 +1329,7 @@ for (period in list(2017:2021, 2022:CAL_END_YEAR)) {
   )
 
   dta2 = dta %>%
-    dplyr::mutate(desc_year = as.integer(as.character(year))) %>%
-    dplyr::left_join(desc_prices, by = "desc_year") %>%
-    dplyr::filter(desc_year %in% period) %>%
+    dplyr::filter(as.integer(as.character(year)) %in% period) %>%
     dplyr::mutate(
       pop = pop / 1000,
       # FGGD stores the official 0--100 Pasture Suitability Index with
@@ -1432,13 +1378,15 @@ print(tab_stat)
 
 ```{r Figure1Map, message=F, warning=F, echo=F, fig.width=8, fig.height=9, dpi=150}
 # Figure 1: Starlink adoption, mobile coverage, and DETER degradation.
-# Built inline from the compact submission-local RDS inputs.
+# Built inline from reusable submission-local spatial intermediates.
 figure1_mobile = readRDS(file.path(
-  DATA_DIR, "processed", "figure1_mobile_coverage.RDS"
+  DATA_DIR, "processed", "mobile_coverage_2021.RDS"
 ))
-figure1_deter = readRDS(file.path(
-  DATA_DIR, "processed", "figure1_deter_2022_2024.RDS"
-))
+deter_map = sf::st_as_sf(readRDS(file.path(
+  DATA_DIR, "processed", "deter_map.RDS"
+)))
+figure1_deter = deter_map %>%
+  dplyr::filter(year %in% c(2022L, 2024L))
 # Municipal Starlink rates for the two mapped years, from the calendar panel
 figure1_starlink = dta %>%
   dplyr::ungroup() %>%
@@ -1644,18 +1592,11 @@ figure_ax_drought = figure_ax_mun %>%
 
 # Compact submission-local inputs reproduce the fixed 2021 coverage layer and
 # the 2021--2024 DETER fire-scar polygons without relying on external paths.
-figure_ax_mobile = readRDS(file.path(
-  DATA_DIR,
-  "processed",
-  "figure1_mobile_coverage.RDS"
-)) %>%
+figure_ax_mobile = figure1_mobile %>%
   sf::st_make_valid() %>%
   sf::st_transform(figure_ax_crs)
-figure_ax_fire = readRDS(file.path(
-  DATA_DIR,
-  "processed",
-  "figure_ax_deter_fire_2021_2024.RDS"
-)) %>%
+figure_ax_fire = deter_map %>%
+  dplyr::filter(alert_class == "fire scar") %>%
   sf::st_transform(figure_ax_crs) %>%
   dplyr::mutate(panel = factor(year, levels = figure_ax_years))
 stopifnot(setequal(sort(unique(figure_ax_fire$year)), figure_ax_years))
@@ -6152,6 +6093,9 @@ normal_year_covlist = covlist
 # abbreviated to fit Stata's 32-character cap and would not match this file.
 panel_path = paste0(panel_dir, "dataset_prodesyr.RDS")
 dta = readRDS(panel_path)
+if (ncol(dta) != 37L) {
+  stop("dataset_prodesyr.RDS must follow the compact 37-column contract")
+}
 if (!identical(attr(dta, "coordinate_basis"), "ibge_municipal_seat")) {
   stop("Rebuild the v3 panel: its coordinates and distances are not marked as IBGE-seat based")
 }
@@ -6165,9 +6109,8 @@ dta = dta %>%
     stopifnot(dplyr::n_distinct(.$codmun) == 772)
     .
   } %>%
-  # Road surfaces, coordinates, CHIRTS-ERA5 Tmax, CHIRPS precipitation, and
-  # distances ship on the panel.
-  add_lagged_price_controls() %>%
+  # Road surfaces, coordinates, climate controls, distances, and lagged real
+  # commodity prices ship on the panel.
   add_spei12_anchor("prodes") %>%
   add_pre2022_fire_scar_spei() %>%
   mutate(year = factor(year, levels = as.character(PRODES_END_YEAR:2017))) %>%

@@ -63,8 +63,8 @@ setwd(code_dir)
 # Number of workers for parallelization
 max_workers = 9
 
-# Name of DETER shapefile (update with your version)
-DETER_zip = "INPE/deter-amz-public-2026mar29.zip"
+# Pinned DETER release used by the panels and map cache.
+DETER_zip = "INPE/deter-amz-public-2025set01.zip"
 
 # PRODES product must match the administrative study region.
 PRODES_LAYER = "yearly_deforestation_amazonia_legal"
@@ -78,9 +78,8 @@ PRODES_zip = paste0("INPE/", PRODES_LAYER, ".zip")
 DATA_DIR = "../data/"
 
 # DV      intermediates. Rebuilt by this script, not committed.
-# DFINAL  the two analysis panels and the other committed analysis inputs: what
-#         starlink_results.Rmd reads, so a fresh clone can reproduce every table
-#         without first running this pipeline.
+# DFINAL  the two analysis panels: what starlink_results.Rmd reads for every
+#         non-map table and estimate, so a fresh clone need not rebuild them.
 DV = paste0(DATA_DIR, "processed/")
 DFINAL = DATA_DIR
 
@@ -151,6 +150,7 @@ SICAR_DIR_ABS = normalizePath(paste0(DRAW, "SICAR"), winslash = "/",
 library(tidyverse)
 library(sf)
 library(readxl)
+library(archive)
 library(tiff)
 library(stringi)
 library(exactextractr)
@@ -761,6 +761,7 @@ base_zones = list(
 
 mun_zone = base_zones$mun$zone %>% select(codmun)
 stopifnot(nrow(mun_zone) == 772, !any(mun_zone$codmun == MOJUI_CODMUN))
+saveRDS(mun_zone, paste0(DV, "mun_zone.RDS"))
 
 public_layers = list(
   ndpf = base_zones$ndpf$zone %>% select(codmun),
@@ -2398,6 +2399,37 @@ mobile = read_csv2(unz(
   group_by(codmun) %>%
   summarise(coverarea = weighted.mean(x = coverarea, w = area))
 
+# Polygon footprint used by both connectivity maps. This is a reusable spatial
+# intermediate, not a Figure 1-specific object. Keep the provider features that
+# intersect the 772-unit panel boundary; the maps handle display rasterization.
+legal_amazon_ufs = c("ac", "am", "ap", "ma", "mt", "pa", "ro", "rr", "to")
+mobile_map_boundary = mun_zone %>%
+  summarise(geometry = st_union(geometry)) %>%
+  st_make_valid()
+mobile_coverage_2021 = lapply(legal_amazon_ufs, function(uf_i) {
+  st_read(
+    paste0(
+      "/vsizip/", DRAW, "ANATEL/areas_cobertas.zip/",
+      "todas_todas_", uf_i, "_municipio_simple.kml"
+    ),
+    quiet = TRUE
+  ) %>%
+    select(geometry) %>%
+    mutate(uf = toupper(uf_i))
+}) %>%
+  bind_rows() %>%
+  st_transform(st_crs(mobile_map_boundary)) %>%
+  st_make_valid() %>%
+  st_filter(mobile_map_boundary, .predicate = st_intersects) %>%
+  select(uf) %>%
+  st_transform(4674)
+saveRDS(
+  mobile_coverage_2021,
+  paste0(DV, "mobile_coverage_2021.RDS"),
+  compress = "xz"
+)
+rm(legal_amazon_ufs, mobile_map_boundary, mobile_coverage_2021)
+
 
 # Tenure areas
 uc_area = zones[[which(zones_prefixes == "uc")]]$zone %>%
@@ -2532,6 +2564,47 @@ deter = st_read(paste0(
   st_transform(crs = proj_wk) %>%
   st_make_valid() %>%
   mutate(alert_id = row_number())
+
+# One reusable map cache retains only the alert footprints needed by the results
+# document: all degradation classes in 2022/2024 and fire scars in 2021--2024.
+# Clip to the same merged 772 municipalities as the panel, then dissolve alert
+# boundaries within municipality x year x class. Neither map displays individual
+# alert boundaries, so the dissolve preserves its information while making the
+# cache much smaller. The municipality-month/year intermediates below are
+# tabular aggregates and cannot draw these polygons.
+deter_map = deter %>%
+  filter(
+    (year %in% c(2022L, 2024L)) |
+      (year %in% 2021:2024 & class == "deter_degr_fire")
+  ) %>%
+  lwgeom::st_snap_to_grid(0.01) %>%
+  st_make_valid() %>%
+  st_intersection(mun_zone) %>%
+  keep_polygons() %>%
+  mutate(
+    year = as.integer(year),
+    alert_class = case_when(
+      class == "deter_degr_fire" ~ "fire scar",
+      class == "deter_degr_wood" ~ "selective logging",
+      class == "deter_degr_outr" ~ "other degradation"
+    )
+  ) %>%
+  select(codmun, year, alert_class) %>%
+  group_by(codmun, year, alert_class) %>%
+  summarise(.groups = "drop") %>%
+  st_make_valid() %>%
+  keep_polygons() %>%
+  st_transform(4674)
+stopifnot(
+  setequal(sort(unique(deter_map$year)), 2021:2024),
+  setequal(
+    unique(deter_map$alert_class),
+    c("fire scar", "selective logging", "other degradation")
+  ),
+  !anyDuplicated(st_drop_geometry(deter_map))
+)
+saveRDS(deter_map, paste0(DV, "deter_map.RDS"), compress = "xz")
+rm(deter_map)
 
 
 process_zone = function(deter, zone, prefix) {
@@ -2668,122 +2741,6 @@ rm(
   deter, process_zone, results_combined, res,
   active_deter_prefixes, active_deter_zones, active_deter_zone_prefixes
 )
-```
-
-
-## 3A. DEFORESTATION - PRODES
-
-```{r 3A-prodes}
-# PRODES deforestation 6.25 ha or higher, Legal Amazon product. This must not
-# point to the Amazon-biome zip: the estimation sample is the full
-# administrative Legal Amazon, matching DETER and the municipal panel.
-prodes = st_read(
-  paste0(paste0("/vsizip/", DRAW), PRODES_zip, "/", PRODES_LAYER, ".shp")
-) %>%
-  rename(class = sub_class) %>%
-  mutate(
-    class = case_when(
-      class == "corte raso com solo exposto" ~ "prodes_defo_cces",
-      class == "corte raso com vegetação" ~ "prodes_defo_ccwv",
-      class == "mineração" ~ "prodes_defo_mine",
-      class == "desmatamento por degradação progressiva" ~ "prodes_defo_dpdp",
-      TRUE ~ "prodes_defo_NA"
-    )
-  ) %>%
-  filter(year >= 2017 & year <= 2025) %>%
-  st_make_valid() %>%
-  st_transform(crs = proj_wk) %>%
-  st_make_valid() %>%
-  select(year, class) %>%
-  mutate(poly_id = row_number())   # v2: unique source polygon, see chunk 2
-
-process_zone = function(prodes, zone, prefix) {
-  area_col = paste0("area_", prefix, "_prodes_defo")
-  n_col = paste0("n_", prefix, "_prodes_defo")
-
-  x = prodes %>%
-    st_intersection(zone) %>%
-    st_make_valid()
-  x = x[as.numeric(st_area(st_geometry(x))) > 0, ]
-
-  x %>%
-    mutate(
-      class = ifelse(class == "", NA, class)
-    ) %>%
-    group_by(codmun, year, class) %>%
-    summarise(n = n_distinct(poly_id), .groups = "drop") %>%
-    mutate(area = as.numeric(units::set_units(st_area(.), km^2))) %>%
-    pivot_wider(
-      names_from = class,
-      values_from = c(area, n),
-      names_glue = paste0("{.value}_", prefix, "_{class}")
-    ) %>%
-    mutate(
-      across(matches("^(area_|n_)"), ~ replace_na(.x, 0)),
-      !!area_col := rowSums(
-        across(starts_with(paste0("area_", prefix, "_prodes_defo_"))),
-        na.rm = TRUE
-      ),
-      !!n_col := rowSums(
-        across(starts_with(paste0("n_", prefix, "_prodes_defo_"))),
-        na.rm = TRUE
-      )
-    ) %>%
-    st_drop_geometry() %>%
-    group_by(codmun, year) %>%
-    summarise(across(matches("^(area_|n_)"), sum), .groups = "drop")
-}
-
-
-tictoc::tic("parallel")
-options(future.globals.maxSize = 2 * 1024^3)
-plan(multisession, workers = min(max_workers, length(zones))) # Parallelization
-
-results = future_lapply(
-  zones,
-  function(z) process_zone(prodes, z$zone, z$prefix)
-)
-
-plan(sequential) # Parallelization (END)
-tictoc::toc()
-
-
-# Recombine chunks sharing the same prefix
-results_combined = list()
-
-for (p in unique(zones_prefixes)) {
-  idx = which(zones_prefixes == p)
-  results_combined[[p]] = bind_rows(results[idx]) %>%
-    group_by(codmun, year) %>%
-    summarise(across(everything(), sum), .groups = "drop")
-}
-
-# Joining tenures
-prodes = zones[[which(zones_prefixes == "mun")]]$zone %>%
-  select(codmun) %>%
-  st_drop_geometry() %>%
-  merge(2017:2025) %>%
-  rename(year = y) %>%
-  arrange(codmun, year)
-
-for (res in results_combined) {
-  prodes = prodes %>% left_join(res, by = c("codmun", "year"))
-}
-
-prodes = prodes %>%
-  mutate_at(
-    vars(starts_with("area_"), starts_with("n_")),
-    ~ replace(., is.na(.), 0)
-  )
-
-# The only locally available 1.0--6.25 ha supplement is biome-specific. Joining
-# it here created a mixed-footprint `prodfull` series. Do not rebuild that series
-# unless INPE supplies the same supplement for the Legal Amazon. Active v3
-# results use the standard >=6.25 ha `*_prodes_defo` outcomes.
-saveRDS(prodes, paste0(DV, "prodes_full.RDS"))
-
-
-rm(prodes, results, results_combined, process_zone, res)
 ```
 
 
@@ -3796,12 +3753,25 @@ extract_raster_file = function(
 
 
 ## 7.1. Maximum temperature (CHIRTS-ERA5) ##
+keep_panel_climate_months = function(paths) {
+  file_ym = str_match(basename(paths), "([0-9]{4})\\.([0-9]{2})\\.tiff?$")
+  file_month = as.Date(paste(file_ym[, 2], file_ym[, 3], "01", sep = "-"))
+  paths[
+    !is.na(file_month) &
+      file_month >= as.Date("2016-08-01") &
+      file_month <= as.Date("2025-07-01")
+  ]
+}
+
+# August 2016--July 2025 is the exact union needed for calendar years
+# 2017--2024 and August--July PRODES years 2017--2025.
 tmax_files = list.files(
   paste0(DRAW, "CHC/CHIRTS-ERA5_Tmax"),
   pattern = "\\.tif$",
   full.names = TRUE
-)
-stopifnot(length(tmax_files) > 0)  # empty: CHIRTS temperature rasters missing from data/raw/CHC
+) %>%
+  keep_panel_climate_months()
+stopifnot(length(tmax_files) == 108)
 
 {
   # Parallelization
@@ -3858,8 +3828,9 @@ prcp_files = list.files(
   paste0(DRAW, "CHC/CHIRPS-v3_latam"),
   pattern = "\\.tiff?$",
   full.names = TRUE
-)
-stopifnot(length(prcp_files) > 0)  # empty: CHIRPS precipitation rasters missing from data/raw/CHC
+) %>%
+  keep_panel_climate_months()
+stopifnot(length(prcp_files) == 108)
 
 plan(multisession, workers = max(1, min(max_workers, length(prcp_files))))
 
@@ -3902,7 +3873,10 @@ saveRDS(
   paste0(DV, "prcp_prodesyr.RDS")
 )
 
-rm(prcp, prcp_list, bbox, amz_nogeo, sum_coverage, extract_raster_file)
+rm(
+  prcp, prcp_list, bbox, amz_nogeo, sum_coverage, extract_raster_file,
+  keep_panel_climate_months
+)
 ```
 
 ## 8. SPEI-12 (Copernicus ERA5-Drought)
@@ -4238,14 +4212,13 @@ reclass_mat = as.matrix(transition_table[, c("code", "cat_id")])
 
 # MapBiomas raster file paths
 period = 2016:2024 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-flist = list.files(
-  paste0(DRAW, "MapBiomas"),
-  pattern = "^brazil_coverage.*\\.tif$",
-  full.names = TRUE
+flist = file.path(
+  DRAW,
+  "MapBiomas",
+  paste0("brazil_coverage_", period, ".tif")
 )
-stopifnot(length(flist) > 0)  # empty: no MapBiomas coverage raster matches this period
-flist = flist[str_detect(flist, pattern = paste(period, collapse = "|"))]
-period_actual = period[seq_along(flist)]
+stopifnot(all(file.exists(flist)))
+period_actual = period
 
 if (length(flist) < 2) {
   stop("At least two MapBiomas coverage rasters are required for transitions.")
@@ -5170,31 +5143,43 @@ rm(faction_source_path, faction_report_years, factions_long, factions)
 # Parana-based indices.
 #
 # Archives: https://www.agricultura.pr.gov.br/Pagina/Historico-Sima
-# Local:    data/raw/SEAB-PR/<year>/...
+# Local:    data/raw/SEAB-PR/sima_2016.rar, ..., sima_2024.zip
 #
-# The archive layout changed three times, so file DISCOVERY is unified here
-# while the parsing below is unchanged:
+# Keep the nine provider archives compressed. They are extracted only into this
+# R session's temporary directory, and those temporary files are removed after
+# each year is parsed. The internal layout changed twice:
 #   2016-2022  one multi-sheet workbook per month, ONE SHEET PER BUSINESS DAY,
 #              the date sitting in the penultimate header cell
 #   2023-2024  a folder of daily files per month, date in the filename
-#   2025       adds a numbered folder level and a "-impressao" print duplicate
-#              of every file, which must be dropped or every day is counted twice
 # Filenames also drift within years (2021 has "base abril.xls", "outubro
-# Base.xls"), so nothing keys off the month name. Every .xls under the year
-# folder is discovered and the FILENAME decides which parser applies.
+# Base.xls"), so nothing keys off the month name. Every workbook inside the
+# archive is discovered recursively and the filename decides which parser applies.
 
-SIMA_DIR <- paste0(DRAW, "SEAB-PR")
-KEEP <- "^Boi|^Soja|^Mandioca|^Arroz|^Milho"
+SIMA_DIR = paste0(DRAW, "SEAB-PR")
+SIMA_ARCHIVE_PATHS = setNames(
+  file.path(
+    SIMA_DIR,
+    c("sima_2016.rar", "sima_2017.rar", paste0("sima_", 2018:2024, ".zip"))
+  ),
+  2016:2024
+)
+missing_sima_archives = SIMA_ARCHIVE_PATHS[!file.exists(SIMA_ARCHIVE_PATHS)]
+if (length(missing_sima_archives) > 0) {
+  stop(
+    "Missing renamed SEAB-PR annual archives: ",
+    paste(basename(missing_sima_archives), collapse = ", "),
+    ". See README section 2.25."
+  )
+}
+KEEP = "^Boi|^Soja|^Mandioca|^Arroz|^Milho"
 
 # one sheet -> tidy rows. Identical to the original: skip 3, rename the first and
 # antepenultimate columns, take the value one row down, keep the five commodities.
 sima_sheet <- function(file, sheet, dat) {
   aux <- suppressMessages(read_excel(file, sheet = sheet, skip = 3))
   if (ncol(aux) < 3) return(NULL)
-  # The 2025 workbooks are padded out to 68 columns with trailing all-zero /
-  # all-blank filler, so a raw ncol(aux) - 2 lands in the padding rather than on
-  # the "Media" column and returns 0 for every price. Trim trailing junk columns
-  # first; on an untrimmed 2024 sheet this is a no-op.
+  # Trim trailing all-zero or all-blank filler before locating the "Media"
+  # column. On an unpadded workbook this is a no-op.
   junk <- vapply(aux, function(c) {
     v <- suppressWarnings(as.numeric(as.character(c)))
     all(is.na(c) | trimws(as.character(c)) == "") || all(is.na(v) | v == 0)
@@ -5215,12 +5200,25 @@ sima_sheet <- function(file, sheet, dat) {
            year = year(dat), month = month(dat), day = day(dat))
 }
 
-sima_files <- function(y) {
-  f <- list.files(file.path(SIMA_DIR, y), pattern = "\\.xls[xm]?$",
-                  recursive = TRUE, full.names = TRUE)
-  # 2025 ships a "-impressao" print copy of every file plus a handful of
-  # " - Copia" duplicates; both would double-weight the days they cover.
-  f[!grepl("impressao|c[oó]pia", f, ignore.case = TRUE)]
+sima_files = function(y) {
+  archive_path = SIMA_ARCHIVE_PATHS[[as.character(y)]]
+  extract_dir = tempfile(pattern = paste0("seab-pr-", y, "-"))
+  dir.create(extract_dir)
+  archive::archive_extract(archive_path, dir = extract_dir)
+
+  files = list.files(
+    extract_dir,
+    pattern = "\\.xls[xm]?$",
+    recursive = TRUE,
+    full.names = TRUE
+  )
+  # A few archives contain print or copy duplicates that would otherwise
+  # double-weight the corresponding business day.
+  files = files[!grepl("impressao|c[oó]pia", files, ignore.case = TRUE)]
+  if (length(files) == 0) {
+    stop("No Excel workbooks found inside ", basename(archive_path))
+  }
+  list(files = files, extract_dir = extract_dir)
 }
 
 # Daily files are named DD-MM-YYYY from April 2023 onward but DD-MM-YY in
@@ -5238,7 +5236,8 @@ sima_file_date <- function(b) {
 cmdty_prices <- tibble(); failed <- character()
 
 for (ano in 2016:2024) {
-  files <- sima_files(ano)
+  sima_year = sima_files(ano)
+  files = sima_year$files
   message(sprintf("SIMA %d: %d files", ano, length(files)))
   for (f in files) {
     b <- basename(f)
@@ -5267,6 +5266,7 @@ for (ano in 2016:2024) {
     if (inherits(got, "try-error") || is.null(got)) failed <- c(failed, f)
     else cmdty_prices <- bind_rows(cmdty_prices, got)
   }
+  unlink(sima_year$extract_dir, recursive = TRUE, force = TRUE)
 }
 message(sprintf("parsed %d daily quotations; %d files failed", nrow(cmdty_prices), length(failed)))
 if (length(failed)) message("  first failures: ", paste(head(basename(failed), 5), collapse = ", "))
@@ -5286,14 +5286,14 @@ cmdty_monthly <- cmdty_prices %>%
 # choice is second order here, but the substitution is recorded rather than
 # silent.
 #
-# The series is pulled once from IBGE SIDRA (table 1737, variable 63: monthly
-# IPCA percent variation) and cached next to the analysis panels, because
-# starlink_results.Rmd reads it too and must not depend on a raw download. IBGE
-# revises the series, so a rebuild here changes the deflator: delete the cache
-# deliberately rather than as routine housekeeping.
-ipca_path = paste0(DFINAL, "ipca_mensal_sidra.csv")
+# The series is pulled directly from IBGE SIDRA (table 1737, variable 63:
+# monthly IPCA percent variation). It is a raw provider input, so keep it under
+# data/raw/IBGE rather than beside the final panels. IBGE can revise the series;
+# delete this file only when deliberately refreshing the source vintage.
+ipca_path = paste0(DRAW, "IBGE/ipca_mensal_sidra.csv")
 if (!file.exists(ipca_path)) {
   message("fetching IPCA from SIDRA table 1737 ...")
+  dir.create(dirname(ipca_path), recursive = TRUE, showWarnings = FALSE)
   sidra_url = paste0(
     "https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/63/p/201601-202412"
   )
@@ -5312,7 +5312,6 @@ if (!file.exists(ipca_path)) {
       ano = as.integer(substr(period, 1, 4)),
       mes = as.integer(substr(period, 5, 6))
     ) %>%
-    select(ano, mes, variacao_mensal) %>%
     arrange(ano, mes)
   stopifnot(
     nrow(ipca_out) == 108,
@@ -5321,6 +5320,7 @@ if (!file.exists(ipca_path)) {
     min(ipca_out$period) == "201601",
     max(ipca_out$period) == "202412"
   )
+  ipca_out = ipca_out %>% select(ano, mes, variacao_mensal)
   write.csv(ipca_out, ipca_path, row.names = FALSE)
   rm(sidra_url, sidra_resp, sidra_ipca, ipca_out)
 }
@@ -5345,25 +5345,59 @@ cmdty <- cmdty_monthly %>%
   select(-factor)
 
 attr(cmdty, "price_base") = "December 2024 BRL"
-saveRDS(cmdty, paste0(DFINAL, "cmdty_price_monthly.RDS"))
+saveRDS(cmdty, paste0(DV, "cmdty_price_monthly.RDS"))
 
-# Annual, on both year conventions
-cmdty_anonormal <- cmdty %>% filter(year >= 2017, year <= 2024) %>%
+# Annual calendar-year prices. Both the contemporaneous descriptive series and
+# the one-year lags used in the regressions are merged into the final panels
+# below. starlink_results.Rmd therefore has no separate commodity-price input.
+cmdty_annual = cmdty %>%
+  filter(year >= 2016, year <= 2024) %>%
   group_by(commodity, year) %>% summarise(price = mean(price), .groups = "drop") %>%
   pivot_wider(names_from = "commodity", names_prefix = "price_", values_from = "price")
 
-cmdty_anoprodes <- cmdty %>% mutate(year = ifelse(month >= 8, year + 1, year)) %>%
+cmdty_price_panel = full_join(
+  cmdty_annual %>%
+    transmute(
+      year = as.integer(year),
+      soy_price_current = price_soy,
+      cattle_price_current = price_cattle
+    ),
+  cmdty_annual %>%
+    transmute(
+      year = as.integer(year) + 1L,
+      soy_price_lagged_level = price_soy,
+      cattle_price_lagged_level = price_cattle
+    ),
+  by = "year"
+) %>%
+  filter(year >= 2017L, year <= 2025L) %>%
+  arrange(year)
+
+stopifnot(
+  identical(cmdty_price_panel$year, 2017:2025),
+  !anyNA(cmdty_price_panel[c(
+    "soy_price_lagged_level", "cattle_price_lagged_level"
+  )]),
+  !anyNA(cmdty_price_panel %>%
+    filter(year <= 2024L) %>%
+    select(soy_price_current, cattle_price_current))
+)
+attr(cmdty_price_panel, "price_base") = "December 2024 BRL"
+saveRDS(cmdty_price_panel, paste0(DV, "cmdty_price_panel.RDS"))
+
+cmdty_anoprodes = cmdty %>% mutate(year = ifelse(month >= 8, year + 1, year)) %>%
   # The selected specifications use calendar-year prices lagged in the results
   # script. Do not create a partial PRODES-2025 price from Aug--Dec 2024.
   filter(year >= 2017, year <= 2024) %>%
   group_by(commodity, year) %>% summarise(price = mean(price), .groups = "drop") %>%
   pivot_wider(names_from = "commodity", names_prefix = "price_", values_from = "price")
 
-attr(cmdty_anonormal, "price_base") = "December 2024 BRL"
 attr(cmdty_anoprodes, "price_base") = "December 2024 BRL"
-saveRDS(cmdty_anonormal, paste0(DFINAL, "cmdty_price_anonormal.RDS"))
 saveRDS(cmdty_anoprodes, paste0(DV, "cmdty_price_anoprodes.RDS"))
-rm(cmdty_monthly, igp, cmdty_anonormal, cmdty_anoprodes)
+rm(
+  cmdty_monthly, igp, cmdty_annual, cmdty_price_panel, cmdty_anoprodes,
+  SIMA_ARCHIVE_PATHS, missing_sima_archives, sima_year
+)
 ```
 
 
@@ -5441,13 +5475,11 @@ sum_yield_prod = function(x) {
 }
 
 
-# The GAEZ rasters live in the shared data folder, not the old project-local
-# rawdata/soy. With the stale path this list came back empty, the loop never
-# ran, and soy_potential.RDS was written with codmun and nothing else.
+# Use only the full-input, high-input/rain-fed soy potential raster documented
+# in the README. Other GAEZ rasters beside it are not analysis inputs.
 SOY_DIR = paste0(DRAW, "FAO-GAEZ")
-files = list.files(SOY_DIR, pattern = "\\.tif$")
-stopifnot(length(files) > 0)  # empty: GAEZ soy-yield rasters missing from SOY_DIR
-files = files[grepl("YXX", files) | grepl("YLD", files) & grepl("RES06", files)]
+files = "DATA_GAEZ-V5_MAPSET_RES05-YXX_GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif"
+stopifnot(file.exists(file.path(SOY_DIR, files)))
 soy = tibble(amz %>% st_drop_geometry()) %>%
   left_join(
     ti %>%
@@ -5673,6 +5705,121 @@ saveRDS(pasture, paste0(DV, "pasture_suitability.RDS"))
 rm(past, pasture)
 ```
 
+## APPENDIX INPUT: PRODES-YEAR DEFORESTATION
+
+```{r 3A-prodes}
+# PRODES deforestation 6.25 ha or higher, Legal Amazon product. This must not
+# point to the Amazon-biome zip: the estimation sample is the full
+# administrative Legal Amazon, matching DETER and the municipal panel.
+prodes = st_read(
+  paste0(paste0("/vsizip/", DRAW), PRODES_zip, "/", PRODES_LAYER, ".shp")
+) %>%
+  rename(class = sub_class) %>%
+  mutate(
+    class = case_when(
+      class == "corte raso com solo exposto" ~ "prodes_defo_cces",
+      class == "corte raso com vegetação" ~ "prodes_defo_ccwv",
+      class == "mineração" ~ "prodes_defo_mine",
+      class == "desmatamento por degradação progressiva" ~ "prodes_defo_dpdp",
+      TRUE ~ "prodes_defo_NA"
+    )
+  ) %>%
+  filter(year >= 2017 & year <= 2025) %>%
+  st_make_valid() %>%
+  st_transform(crs = proj_wk) %>%
+  st_make_valid() %>%
+  select(year, class) %>%
+  mutate(poly_id = row_number())   # v2: unique source polygon, see chunk 2
+
+process_zone = function(prodes, zone, prefix) {
+  area_col = paste0("area_", prefix, "_prodes_defo")
+  n_col = paste0("n_", prefix, "_prodes_defo")
+
+  x = prodes %>%
+    st_intersection(zone) %>%
+    st_make_valid()
+  x = x[as.numeric(st_area(st_geometry(x))) > 0, ]
+
+  x %>%
+    mutate(
+      class = ifelse(class == "", NA, class)
+    ) %>%
+    group_by(codmun, year, class) %>%
+    summarise(n = n_distinct(poly_id), .groups = "drop") %>%
+    mutate(area = as.numeric(units::set_units(st_area(.), km^2))) %>%
+    pivot_wider(
+      names_from = class,
+      values_from = c(area, n),
+      names_glue = paste0("{.value}_", prefix, "_{class}")
+    ) %>%
+    mutate(
+      across(matches("^(area_|n_)"), ~ replace_na(.x, 0)),
+      !!area_col := rowSums(
+        across(starts_with(paste0("area_", prefix, "_prodes_defo_"))),
+        na.rm = TRUE
+      ),
+      !!n_col := rowSums(
+        across(starts_with(paste0("n_", prefix, "_prodes_defo_"))),
+        na.rm = TRUE
+      )
+    ) %>%
+    st_drop_geometry() %>%
+    group_by(codmun, year) %>%
+    summarise(across(matches("^(area_|n_)"), sum), .groups = "drop")
+}
+
+
+tictoc::tic("parallel")
+options(future.globals.maxSize = 2 * 1024^3)
+plan(multisession, workers = min(max_workers, length(zones))) # Parallelization
+
+results = future_lapply(
+  zones,
+  function(z) process_zone(prodes, z$zone, z$prefix)
+)
+
+plan(sequential) # Parallelization (END)
+tictoc::toc()
+
+
+# Recombine chunks sharing the same prefix
+results_combined = list()
+
+for (p in unique(zones_prefixes)) {
+  idx = which(zones_prefixes == p)
+  results_combined[[p]] = bind_rows(results[idx]) %>%
+    group_by(codmun, year) %>%
+    summarise(across(everything(), sum), .groups = "drop")
+}
+
+# Joining tenures
+prodes = zones[[which(zones_prefixes == "mun")]]$zone %>%
+  select(codmun) %>%
+  st_drop_geometry() %>%
+  merge(2017:2025) %>%
+  rename(year = y) %>%
+  arrange(codmun, year)
+
+for (res in results_combined) {
+  prodes = prodes %>% left_join(res, by = c("codmun", "year"))
+}
+
+prodes = prodes %>%
+  mutate_at(
+    vars(starts_with("area_"), starts_with("n_")),
+    ~ replace(., is.na(.), 0)
+  )
+
+# The only locally available 1.0--6.25 ha supplement is biome-specific. Joining
+# it here created a mixed-footprint `prodfull` series. Do not rebuild that series
+# unless INPE supplies the same supplement for the Legal Amazon. Active v3
+# results use the standard >=6.25 ha `*_prodes_defo` outcomes.
+saveRDS(prodes, paste0(DV, "prodes_full.RDS"))
+
+
+rm(prodes, results, results_combined, process_zone, res)
+```
+
 ## 16. JOINING DATASETS
 
 ```{r 16-joining-datasets}
@@ -5839,6 +5986,14 @@ stopifnot(
   all(is.finite(spei12_prodes$spei12_jul))
 )
 
+# Real commodity prices (December 2024 BRL), prepared in section 13. These are
+# final-panel columns, not separate inputs to the results document.
+cmdty_price_panel = readRDS(paste0(DV, "cmdty_price_panel.RDS"))
+stopifnot(
+  identical(attr(cmdty_price_panel, "price_base"), "December 2024 BRL"),
+  !anyDuplicated(cmdty_price_panel$year)
+)
+
 # Predetermined fire-scar exposure used by Model II. Carry it on the compact
 # panel so the results file does not need the monthly DETER intermediate.
 pre2022_fire = readRDS(paste0(DV, "deter_monthly.RDS")) %>%
@@ -5866,6 +6021,7 @@ ds_normalyr = readRDS(paste0(DV, "munic.RDS")) %>%
       readRDS(paste0(DV, "pasture_suitability.RDS")),
       by = "codmun"
     ) %>%
+    left_join(cmdty_price_panel, by = "year") %>%
     # Section A2: 2021 planted-area and herd shares, the OBSERVED exposure
     # weights for the commodity-price channel (soyield_ful_mun_high and
     # pasture_suit_mun above are the POTENTIAL weights). Optional rather than
@@ -5941,7 +6097,10 @@ normal_panel_columns = c(
   "areamun", "pop", "dens", "lat", "lon", "dist_coast", "dist_brasilia",
   "way_road_pav", "way_rail",
   "area_forest", "areaforest_2021", "lag_areaforest",
-  "soyield_ful_mun_high", "pasture_suit_mun", "geosat", "tmax", "prcp",
+  "soyield_ful_mun_high", "pasture_suit_mun",
+  "soy_price_current", "cattle_price_current",
+  "soy_price_lagged_level", "cattle_price_lagged_level",
+  "geosat", "tmax", "prcp",
   "spei12_dec", "pre2022_fire_scar_intensity",
   "areati", "areauc", "areasett", "areandpf",
   "areasicar21_large", "areasicar21_small",
@@ -5980,7 +6139,7 @@ if (length(missing_normal_columns)) {
 }
 ds_normalyr = ds_normalyr %>% select(all_of(normal_panel_columns))
 stopifnot(
-  ncol(ds_normalyr) == 99L,
+  ncol(ds_normalyr) == 103L,
   identical(names(ds_normalyr), normal_panel_columns)
 )
 
@@ -6018,6 +6177,7 @@ stata_names = function(d) {
 
 write_panel = function(d, stem) {
   attr(d, "coordinate_basis") = "ibge_municipal_seat"
+  attr(d, "commodity_price_base") = "December 2024 BRL"
   attr(d, "faction_report_years") = c(2023L, 2024L)
   attr(d, "faction_time_varying") = FALSE
   saveRDS(d, paste0(DFINAL, stem, ".RDS"))      # authoritative, full names
@@ -6076,6 +6236,11 @@ ds_prodesyr = readRDS(paste0(DV, "munic.RDS")) %>%
       by = "codmun"
     ) %>%
     left_join(
+      cmdty_price_panel %>%
+        select(year, soy_price_lagged_level, cattle_price_lagged_level),
+      by = "year"
+    ) %>%
+    left_join(
       readRDS(paste0(DV, "starlink_prodesyr.RDS")),
       by = c("codmun", "year")
     ) %>%
@@ -6118,6 +6283,7 @@ ds_prodesyr = readRDS(paste0(DV, "munic.RDS")) %>%
       way_road_pav, way_rail,
       tmax, prcp, geosat,
       soyield_ful_mun_high, pasture_suit_mun,
+      soy_price_lagged_level, cattle_price_lagged_level,
       spei12_jul, pre2022_fire_scar_intensity,
       area_mun_prodes_defo,
       area_mun_prodes_defo_ccut,
@@ -6133,7 +6299,10 @@ ds_prodesyr = readRDS(paste0(DV, "munic.RDS")) %>%
       n_mun_prodes_defo_mine
     )
 stopifnot(
-  ncol(ds_prodesyr) == 35L,
+  ncol(ds_prodesyr) == 37L,
+  !anyNA(ds_prodesyr[c(
+    "soy_price_lagged_level", "cattle_price_lagged_level"
+  )]),
   !anyNA(ds_prodesyr$spei12_jul),
   !anyNA(ds_prodesyr$pre2022_fire_scar_intensity)
 )
