@@ -6140,7 +6140,6 @@ stopifnot(
 
 # Write the requested PRODES-year panel through 2025.
 write_panel(ds_prodesyr, "dataset_prodesyr")
-writeLines(PRODES_LAYER, paste0(DFINAL, "prodes_source.txt"))
 
 
 # Monthly

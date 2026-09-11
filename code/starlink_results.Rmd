@@ -202,45 +202,19 @@ add_lagged_price_controls = function(dat) {
     )
 }
 
-# Join the Copernicus ERA5-Drought SPEI-12 endpoint aligned to each outcome
-# window. Calendar year t uses December t (January--December); PRODES year t
-# uses July t (August t-1--July t). Only the endpoint used by that panel is
-# required, avoiding irrelevant missing-value restrictions.
+# Both panels carry their SPEI-12 endpoint from code/work_dataframe.Rmd.
+# Calendar year t uses December t (January--December); PRODES year t uses July t
+# (August t-1--July t). This only checks that the right endpoint is present.
 add_spei12_anchor = function(dat, panel = c("calendar", "prodes")) {
   panel = match.arg(panel)
   value_name = if (panel == "calendar") "spei12_dec" else "spei12_jul"
-  if (value_name %in% names(dat) && all(is.finite(dat[[value_name]]))) {
-    return(dat)
+  if (!(value_name %in% names(dat)) || !all(is.finite(dat[[value_name]]))) {
+    stop(
+      "The panel must carry a complete ", value_name, " column. ",
+      "Rebuild it with code/work_dataframe.Rmd."
+    )
   }
-  file_name = if (panel == "calendar") {
-    "spei12_copernicus_era5_normalyr.RDS"
-  } else {
-    "spei12_copernicus_era5_prodesyr.RDS"
-  }
-  drought = readRDS(file.path(DATA_DIR, "processed", file_name)) %>%
-    dplyr::mutate(
-      codmun = as.numeric(codmun),
-      year = as.numeric(year)
-    ) %>%
-    dplyr::select(codmun, year, dplyr::all_of(value_name))
-  stopifnot(
-    !anyDuplicated(drought[c("codmun", "year")]),
-    all(is.finite(drought[[value_name]]))
-  )
-
-  n_before = nrow(dat)
-  out = dat %>%
-    dplyr::select(-dplyr::any_of(c("spei12_dec", "spei12_jul"))) %>%
-    dplyr::mutate(
-      codmun = as.numeric(codmun),
-      year = as.numeric(year)
-    ) %>%
-    dplyr::left_join(drought, by = c("codmun", "year"))
-  stopifnot(
-    nrow(out) == n_before,
-    all(is.finite(out[[value_name]]))
-  )
-  out
+  dat
 }
 
 # Predetermined fire susceptibility used in the selected specification. DETER
@@ -1459,11 +1433,19 @@ figure1_mobile = readRDS(file.path(
 figure1_deter = readRDS(file.path(
   DATA_DIR, "processed", "figure1_deter_2022_2024.RDS"
 ))
-figure1_starlink = readRDS(file.path(
-  DATA_DIR, "processed", "starlink_normalyr.RDS"
-)) %>%
+# Municipal Starlink rates for the two mapped years, from the calendar panel
+figure1_starlink = dta %>%
   dplyr::ungroup() %>%
+  dplyr::transmute(
+    codmun = as.numeric(as.character(codmun)),
+    year = as.integer(as.character(year)),
+    starlink
+  ) %>%
   dplyr::filter(year %in% c(2022L, 2024L))
+stopifnot(
+  nrow(figure1_starlink) == 2L * 772L,
+  !anyDuplicated(figure1_starlink[c("codmun", "year")])
+)
 
 # This is the panel-matched 772-unit geography. In particular, it dissolves
 # Mojui dos Campos into Santarem before joining the municipal panel values.
@@ -6159,14 +6141,6 @@ normal_year_covlist = covlist
 
 # .RDS for the same reason as the calendar panel above: the .dta names are
 # abbreviated to fit Stata's 32-character cap and would not match this file.
-prodes_source_marker = paste0(panel_dir, "prodes_source.txt")
-stopifnot(
-  file.exists(prodes_source_marker),
-  identical(
-    trimws(readLines(prodes_source_marker, warn = FALSE)[1]),
-    "yearly_deforestation_amazonia_legal"
-  )
-)
 panel_path = paste0(panel_dir, "dataset_prodesyr.RDS")
 dta = readRDS(panel_path)
 if (!identical(attr(dta, "coordinate_basis"), "ibge_municipal_seat")) {

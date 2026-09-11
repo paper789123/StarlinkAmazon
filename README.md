@@ -27,7 +27,7 @@ They are separate on purpose. Raw downloads are large and often already sit some
 DRAW = "D:/data/starlink-raw/"        # absolute paths are fine
 ```
 
-Nothing is written under `DRAW`. The results scripts have the same `DATA_DIR` and read the committed panels plus the compact RDS inputs listed below. They do not need the 226 MB DETER or 22 MB mobile-coverage source archives to redraw Figure 1.
+Nothing is written under `DRAW`. The results script uses the same `DATA_DIR` and reads the two panels plus the small inputs listed below. They do not need the 226 MB DETER or 22 MB mobile-coverage source archives to redraw Figure 1.
 
 Run each script from the folder that contains it. Both stop with a clear message if they cannot locate themselves, rather than resolving relative paths against the wrong directory.
 
@@ -35,28 +35,25 @@ Run each script from the folder that contains it. Both stop with a clear message
 
 ```
 code/
-  work_dataframe.Rmd         raw provider files -> the two analysis panels
-  starlink_results.Rmd       the panels -> every table and figure
-  starlink_results.html      rendered output, read it without running anything
+  work_dataframe.Rmd           raw provider files -> the two analysis panels
+  starlink_results.Rmd         the panels -> every table and figure
+  starlink_results.html        rendered output, readable without running anything
 data/
-  dataset_normalyr.RDS       calendar panel, Jan 2022 - Dec 2024      committed
-  dataset_prodesyr.RDS       compact native-PRODES panel, 2017-2025   committed
-  cmdty_price_monthly.RDS    commodity price series                   committed
-  cmdty_price_anonormal.RDS  annual commodity price averages          committed
-  ipca_mensal_sidra.csv      IPCA deflator (IBGE SIDRA table 1737)    committed
-  prodes_source.txt          PRODES vintage note                      committed
-  raw/                       provider downloads, one folder each      not committed
-    FBSP/amazon_factions_2023_2024.csv  hand-coded, not downloadable  committed
-  processed/                 pipeline intermediates, rebuilt by work_dataframe.Rmd
-    figure1_deter_2022_2024.RDS         DETER polygons for Figure 1   committed
-    figure1_mobile_coverage.RDS         mobile-coverage geometry      committed
-    figure_ax_deter_fire_2021_2024.RDS  DETER fire scars, appendix    committed
-    mun_zone.RDS                        772-unit map geometry         committed
-    spei12_copernicus_era5_normalyr.RDS SPEI-12, calendar year        committed
-    spei12_copernicus_era5_prodesyr.RDS SPEI-12, PRODES year          committed
-    starlink_normalyr.RDS               municipal Starlink rates      committed
-    everything else                                                   not committed
+  dataset_normalyr.RDS         calendar-year panel, 772 municipalities, 2017-2024
+  dataset_prodesyr.RDS         PRODES-year panel, 772 municipalities, 2017-2025
+  cmdty_price_monthly.RDS      soybean and cattle prices (lagged price controls)
+  cmdty_price_anonormal.RDS    annual price averages (descriptive statistics)
+  ipca_mensal_sidra.csv        IPCA deflator, fixed vintage (IBGE SIDRA 1737)
+  processed/
+    figure1_deter_2022_2024.RDS         DETER degradation polygons, Figure 1
+    figure1_mobile_coverage.RDS         mobile-coverage area, Figures 1 and A1
+    figure_ax_deter_fire_2021_2024.RDS  DETER fire scars, Figure A1
+    mun_zone.RDS                        municipal boundaries for the maps
+  raw/
+    FBSP/amazon_factions_2023_2024.csv  faction presence, hand-coded (2.27)
 ```
+
+These files are everything `starlink_results.Rmd` needs. Rebuilding the panels with `work_dataframe.Rmd` also requires the provider downloads in section 2, saved under `data/raw/<PROVIDER>/`. The pipeline writes its intermediates to `data/processed/`.
 
 Raw downloads go under `data/raw/<PROVIDER>/`, one folder per provider, named exactly as in section 2. After downloading, `data/raw/` looks like:
 
@@ -291,7 +288,7 @@ This must be the *administrative Legal Amazon* product, not the Amazon-biome one
 | **URL** | <https://terrabrasilis.dpi.inpe.br/downloads/> |
 | **License** | CC BY-SA 4.0 |
 
-**Instructions:** on the same page, find **Bioma Amazônia — DETER (Avisos)** and download the public alert shapefile. Save it to `data/raw/INPE/` without extracting, and set `DETER_shp` in chunk 0 of `work_dataframe.Rmd` to the filename you downloaded. Figure 1 uses the legacy degradation layer `deter-amz-deter-public.shp` inside this archive. The committed `figure1_deter_2022_2024.RDS` retains only its 2022 and 2024 fire-scar, degradation, and selective-logging polygons.
+**Instructions:** on the same page, find **Bioma Amazônia — DETER (Avisos)** and download the public alert shapefile. Save it to `data/raw/INPE/` without extracting, and set `DETER_shp` in chunk 0 of `work_dataframe.Rmd` to the filename you downloaded. Figure 1 uses the legacy degradation layer `deter-amz-deter-public.shp` inside this archive. The included `figure1_deter_2022_2024.RDS` retains only its 2022 and 2024 fire-scar, degradation, and selective-logging polygons.
 
 ---
 
@@ -404,7 +401,7 @@ This is the source of both the Starlink subscription counts (the treatment) and 
 | **URL** | <https://dados.gov.br/dados/conjuntos-dados/cobertura_movel> |
 | **License** | CC BY |
 
-**Instructions:** on the same page under **Recursos**, find *Áreas Cobertas* (Coverage Areas) and download the ZIP as `areas_cobertas.zip` to `data/raw/ANATEL/` without extracting. The committed `figure1_mobile_coverage.RDS` combines the nine Legal Amazon state layers and clips them to the panel boundary.
+**Instructions:** on the same page under **Recursos**, find *Áreas Cobertas* (Coverage Areas) and download the ZIP as `areas_cobertas.zip` to `data/raw/ANATEL/` without extracting. The included `figure1_mobile_coverage.RDS` combines the nine Legal Amazon state layers and clips them to the panel boundary.
 
 ---
 
@@ -463,7 +460,7 @@ Submit the request, download the resulting ZIP of monthly NetCDF files, and save
 
 The archive contains monthly 0.25-degree NetCDF files. Copernicus derives the index from ERA5 reanalysis using Penman--Monteith potential evapotranspiration and a 1991--2020 reference period. Section 8 of `code/work_dataframe.Rmd` extracts SPEI-12. It reads the archive inventory and temporarily unpacks only the 17 December/calendar and July/PRODES endpoint files needed by the two panels. This avoids unpacking the full archive and avoids GDAL NetCDF auxiliary-metadata errors observed with direct `/vsizip/` access.
 
-The extraction writes `spei12_copernicus_era5_normalyr.RDS` and `spei12_copernicus_era5_prodesyr.RDS` to `data/processed/`. The selected results script uses the December anchor for January--December outcomes and the July anchor for August--July PRODES-year outcomes.
+The extraction writes `spei12_copernicus_era5_normalyr.RDS` and `spei12_copernicus_era5_prodesyr.RDS` to `data/processed/` and joins them to the panels: the calendar panel carries the December anchor for January--December outcomes, and the PRODES panel carries the July anchor for August--July outcomes.
 
 ---
 
@@ -518,7 +515,7 @@ and ` - Copia` duplicates automatically.
 | **Source** | IBGE — SIDRA table 1737, variable 63 |
 | **License** | CC0 |
 
-Fetched automatically from the SIDRA API by `work_dataframe.Rmd` for January 2016 through December 2024 and cached beside the analysis panels. Prices are stored directly in December 2024 BRL. **The cache is committed deliberately:** IBGE revises the series, so deleting it can change the deflator. Delete it only if you intend that.
+Fetched automatically from the SIDRA API by `work_dataframe.Rmd` for January 2016 through December 2024 and cached beside the analysis panels. Prices are stored directly in December 2024 BRL. **The cache is included deliberately:** IBGE revises the series, so deleting it can change the deflator. Delete it only if you intend that.
 
 ---
 
@@ -543,9 +540,9 @@ Fetched automatically from the SIDRA API by `work_dataframe.Rmd` for January 201
 3. **Check `DATA_DIR` and `DRAW`** at the top of `work_dataframe.Rmd`, and    `DATA_DIR` in `starlink_results.Rmd`. If the raw downloads already exist    somewhere, point `DRAW` there instead of copying them. Nothing else needs editing.
 4. **Set `DETER_shp`** in chunk 0 of `work_dataframe.Rmd` to the DETER filename you downloaded (2.13).
 5. **Build the panels** by knitting `code/work_dataframe.Rmd`. Allow many hours    and roughly 32 GB of RAM; the SICAR tenure build alone runs for hours. Worker counts are set by `max_workers` in chunk 0.
-6. **Produce the selected results** by knitting `code/starlink_results.Rmd`. One knit reads the committed panels and SPEI-12 anchors (or the ones rebuilt in step 5) and renders every table and figure into `code/starlink_results.html`. There are no parameters or active render variants.
+6. **Produce the selected results** by knitting `code/starlink_results.Rmd`. One knit reads the included panels (or the ones rebuilt in step 5) and renders every table and figure into `code/starlink_results.html`. There are no parameters or active render variants.
 
-Step 6 alone reproduces every number in the paper from the committed panels, so a reader who only wants the tables can skip steps 2, 4 and 5.
+Step 6 alone reproduces every number in the paper from the included panels, so a reader who only wants the tables can skip steps 2, 4 and 5.
 
 Expect step 6 to take hours: the leave-one-microregion-out and leave-one-state-out sweeps re-estimate every outcome once per dropped unit and dominate the cost. Raise `robust_max_workers` near the top of the file if you have cores to spare; it defaults to 3.
 

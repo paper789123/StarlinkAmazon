@@ -15,15 +15,16 @@
 manuscript/
 
 # --- data ------------------------------------------------------------------
-# Default-deny, then re-include exactly what code/starlink_results.Rmd reads,
-# plus the two small hand-built inputs that cannot be downloaded.
+# Default-deny, then re-include exactly what code/starlink_results.Rmd reads:
+# the two panels, the commodity prices it joins at estimation time, and the
+# geometry for the maps. Also kept: the IPCA cache that pins the deflator
+# vintage, and the hand-coded FBSP file, which cannot be downloaded.
 data/*
 !data/cmdty_price_anonormal.RDS
 !data/cmdty_price_monthly.RDS
 !data/dataset_normalyr.RDS
 !data/dataset_prodesyr.RDS
 !data/ipca_mensal_sidra.csv
-!data/prodes_source.txt
 
 !data/processed/
 data/processed/*
@@ -31,9 +32,6 @@ data/processed/*
 !data/processed/figure1_mobile_coverage.RDS
 !data/processed/figure_ax_deter_fire_2021_2024.RDS
 !data/processed/mun_zone.RDS
-!data/processed/spei12_copernicus_era5_normalyr.RDS
-!data/processed/spei12_copernicus_era5_prodesyr.RDS
-!data/processed/starlink_normalyr.RDS
 
 # Hand-coded from the Cartografias reports; not a provider download.
 !data/raw/
