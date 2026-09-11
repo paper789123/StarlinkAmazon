@@ -423,12 +423,18 @@ loo_microregion_share = as.numeric(Sys.getenv(
   unset = "1"
 ))
 
-# Parallel workers for the leave-one-out and leave-one-state-out sweeps. This is
-# the single largest cost in the document -- raise it on a machine with cores to
-# spare.
+# Parallel workers for the leave-one-out and leave-one-state-out sweeps, the
+# single largest cost in the document. Each worker needs about 110 MB, so cores
+# are the limit, not memory: the default is 16, capped at one less than the
+# machine's logical cores. Set STARLINK_ROBUST_MAX_WORKERS to override it.
+robust_default_workers = max(
+  1L,
+  min(16L, parallel::detectCores() - 1L),
+  na.rm = TRUE
+)
 robust_max_workers = as.integer(Sys.getenv(
   "STARLINK_ROBUST_MAX_WORKERS",
-  unset = "3"
+  unset = as.character(robust_default_workers)
 ))
 
 stopifnot(
@@ -4890,7 +4896,10 @@ if (length(loo_microregions) == 0) {
   # defined in that environment otherwise carry all previously created spatial
   # objects when future inspects them, making a small regression worker appear to
   # be several GiB. Every dependency needed below is passed explicitly, and the
-  # worker's enclosing environment is reset to baseenv().
+  # worker's enclosing environment is reset to globalenv(), which R serializes as
+  # a reference rather than by content, so the worker stays a few KB. Do not use
+  # baseenv(): with future 1.75.0 and future.apply 1.20.2, future_lapply() never
+  # returns from a closure whose environment is baseenv().
   loo_worker = function(
     drop_microreg,
     data_worker,
@@ -4979,7 +4988,7 @@ if (length(loo_microregions) == 0) {
       dplyr::mutate(result, dropped_microreg = drop_microreg)
     })
   }
-  environment(loo_worker) = baseenv()
+  environment(loo_worker) = globalenv()
 
   # This sweep is the single largest cost in the document: every microregion is
   # dropped in turn and every outcome re-estimated on the remainder. It runs in
