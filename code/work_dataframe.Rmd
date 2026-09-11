@@ -100,9 +100,9 @@ DRAW = paste0(DATA_DIR, "raw/")
 # still written to DV as zones.RDS, sicar_area.RDS and overlap_area.RDS.
 DS = paste0(DV, "tenures/")
 
-# Create the folders this pipeline WRITES to. Raw folders are deliberately not
-# created: they are user-supplied, and creating an empty one would turn a missing
-# download into a silent empty read further down.
+# Create only the folders this pipeline writes to. The repository already ships
+# the raw-provider directory skeleton; the presence check below ignores its
+# .gitkeep markers and still fails when a provider has no downloaded input.
 for (folder in c(DV, DS, DFINAL)) {
   if (!dir.exists(folder)) {
     dir.create(folder, recursive = TRUE)
@@ -115,14 +115,27 @@ for (folder in c(DV, DS, DFINAL)) {
 # Each entry is a provider folder under data/raw/; README.md lists what belongs
 # in each and where to download it.
 raw_providers = c(
-  "ANA", "ANATEL", "CAMS", "CHC", "CNFP", "DATASUS", "DNIT", "FAO-GAEZ",
+  "ANA", "ANATEL", "CAMS", "CHC", "CNFP", "DATASUS", "DNIT", "FAO",
   "FBSP", "FUNAI", "IBAMA", "IBGE", "ICMBio", "INCRA", "INPE", "MapBiomas",
   "SEAB-PR", "SICAR"
 )
-missing_raw = raw_providers[
-  !dir.exists(file.path(DRAW, raw_providers)) |
-    lengths(lapply(file.path(DRAW, raw_providers), list.files)) == 0
-]
+raw_provider_has_input = vapply(
+  file.path(DRAW, raw_providers),
+  function(folder) {
+    if (!dir.exists(folder)) {
+      return(FALSE)
+    }
+    files = list.files(
+      folder,
+      recursive = TRUE,
+      all.files = TRUE,
+      no.. = TRUE
+    )
+    any(basename(files) != ".gitkeep")
+  },
+  logical(1)
+)
+missing_raw = raw_providers[!raw_provider_has_input]
 if (length(missing_raw) > 0) {
   stop(
     "Raw sources missing or empty under\n  DRAW = ", DRAW,
@@ -135,7 +148,7 @@ if (length(missing_raw) > 0) {
     "\nthan copying. README section 2 lists what each folder should contain."
   )
 }
-rm(raw_providers, missing_raw)
+rm(raw_providers, raw_provider_has_input, missing_raw)
 
 # Absolute twins of the two paths the SICAR builder uses inside parallel workers.
 # A worker is a fresh R session and does not necessarily inherit this session's
@@ -5477,7 +5490,7 @@ sum_yield_prod = function(x) {
 
 # Use only the full-input, high-input/rain-fed soy potential raster documented
 # in the README. Other GAEZ rasters beside it are not analysis inputs.
-SOY_DIR = paste0(DRAW, "FAO-GAEZ")
+SOY_DIR = paste0(DRAW, "FAO")
 files = "DATA_GAEZ-V5_MAPSET_RES05-YXX_GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif"
 stopifnot(file.exists(file.path(SOY_DIR, files)))
 soy = tibble(amz %>% st_drop_geometry()) %>%
@@ -5669,9 +5682,17 @@ rm(soy)
 # index. (The pair of layers IS useful as a frontier-vs-intensification
 # heterogeneity test, but that is a mechanism test, not a control.)
 
-# ESRI ArcInfo Binary Grid, not a GeoTIFF: point terra at the *directory*, and
-# keep the sibling info/ folder or the grid will not open.
-past = terra::rast(paste0(DRAW, "FAO-GAEZ/fggd_pasture/pasture_si"))
+# ESRI ArcInfo Binary Grid, not a GeoTIFF. GDAL's /vsizip/ virtual filesystem
+# exposes every component of the multi-file grid without extracting the archive.
+# hdr.adf is the entry point; GDAL reads its sibling .adf files as needed.
+pasture_zip = normalizePath(
+  file.path(DRAW, "FAO", "Map6_56.zip"),
+  winslash = "/",
+  mustWork = TRUE
+)
+past = terra::rast(paste0(
+  "/vsizip/", pasture_zip, "/pasture_si/hdr.adf"
+))
 
 # -997 is a nodata sentinel, not a suitability value (1.2% of Amazon-area cells).
 # Mask it BEFORE any zonal statistic, otherwise municipal means are dragged down,
@@ -5702,7 +5723,7 @@ pasture = tibble(
 )
 
 saveRDS(pasture, paste0(DV, "pasture_suitability.RDS"))
-rm(past, pasture)
+rm(past, pasture, pasture_zip)
 ```
 
 ## APPENDIX INPUT: PRODES-YEAR DEFORESTATION

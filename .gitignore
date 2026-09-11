@@ -33,6 +33,12 @@ data/processed/*
 # Hand-coded from the Cartografias reports; not a provider download.
 !data/raw/
 data/raw/*
+!data/raw/*/
+data/raw/*/*
+!data/raw/*/.gitkeep
+!data/raw/CHC/*/
+data/raw/CHC/*/*
+!data/raw/CHC/*/.gitkeep
 !data/raw/FBSP/
 data/raw/FBSP/*
 !data/raw/FBSP/amazon_factions_2023_2024.csv

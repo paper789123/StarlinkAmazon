@@ -1,17 +1,18 @@
 # The Effects of Starlink Adoption on Forest Degradation in the Amazon
 
-Replication package. Municipality-level panel of the 772 units of the Brazilian Legal Amazon, estimated by shift-share 2SLS.
+Replication package for constructing municipality-level panels for 772 units in the Brazilian Legal Amazon and reproducing the included tables and figures.
 
 ## 1. Overview
 
-The baseline replication uses two scripts, run in order:
+Run these scripts in order:
 
 ```
-code/work_dataframe.Rmd     raw provider files  ->  main calendar panel + appendix PRODES-year panel
+code/work_dataframe.Rmd     raw provider files  ->  calendar-year and PRODES-year panels
 code/starlink_results.Rmd   included inputs     ->  every table and figure
 ```
 
-The selected specification in `code/starlink_results.Rmd` includes GEO subscriptions and Copernicus ERA5-Drought SPEI-12. Section 8 of the panel-construction script extracts the December SPEI-12 anchor for the main calendar-year analysis and the July anchor for the PRODES-year appendix analysis. The vertical 2022/2024 map is built inline in the results script.
+- `work_dataframe.Rmd` extracts December and July SPEI-12 values into the calendar-year and PRODES-year panels.
+- `starlink_results.Rmd` assembles the maps from the included panel and spatial files.
 
 Both resolve every path relative to their own folder, so the package can sit anywhere. Two settings near the top of `work_dataframe.Rmd` control where data is read from and written to:
 
@@ -20,13 +21,15 @@ DATA_DIR = "../data/"            # what the pipeline WRITES: intermediates + pan
 DRAW     = paste0(DATA_DIR, "raw/")   # where the raw provider downloads ARE
 ```
 
-They are separate on purpose. Raw downloads are large and often already sit somewhere else — a shared folder, an external drive, an existing archive — and pointing `DRAW` at that collection avoids duplicating tens of gigabytes:
+If the raw downloads already exist elsewhere, point `DRAW` at that directory:
 
 ```
 DRAW = "D:/data/starlink-raw/"        # absolute paths are fine
 ```
 
-The pipeline reads provider files under `DRAW`; the only file it may create there is the small IPCA API download under `IBGE/`. The results script uses the same `DATA_DIR` and reads the two self-contained panels plus the compact spatial inputs listed below. It does not need the 226 MB DETER or 22 MB mobile-coverage source archives to redraw the maps.
+- `work_dataframe.Rmd` reads provider files under `DRAW` and writes intermediates and panels under `DATA_DIR`.
+- The only file it may create under `DRAW` is `IBGE/ipca_mensal_sidra.csv`.
+- `starlink_results.Rmd` reads the two panels and three processed spatial files listed below.
 
 Run each script from the folder that contains it. Both stop with a clear message if they cannot locate themselves, rather than resolving relative paths against the wrong directory.
 
@@ -34,12 +37,12 @@ Run each script from the folder that contains it. Both stop with a clear message
 
 ```
 code/
-  work_dataframe.Rmd           raw provider files -> main and appendix panels
+  work_dataframe.Rmd           raw provider files -> calendar and PRODES-year panels
   starlink_results.Rmd         included inputs -> every table and figure
   starlink_results.html        rendered output, readable without running anything
 data/
-  dataset_normalyr.RDS         main calendar-year panel, 772 municipalities, 2017-2024
-  dataset_prodesyr.RDS         appendix PRODES-year panel, 772 municipalities, 2017-2025
+  dataset_normalyr.RDS         calendar-year panel, 772 municipalities, 2017-2024
+  dataset_prodesyr.RDS         PRODES-year panel, 772 municipalities, 2017-2025
   processed/
     deter_map.RDS                       DETER polygons used by both maps
     mobile_coverage_2021.RDS            mobile-coverage area used by both maps
@@ -49,7 +52,9 @@ data/
     INCRA/Assentamento Brasil.zip       settlement polygons, included (2.10)
 ```
 
-The main calendar-year panel, appendix PRODES-year panel, and three files under `data/processed/` are everything `starlink_results.Rmd` needs. The included raw INCRA and FBSP files support panel construction but are not read by the results script. Rebuilding the panels with `work_dataframe.Rmd` also requires the other provider inputs in section 2, saved under `data/raw/<PROVIDER>/`. The pipeline writes its intermediates to `data/processed/`.
+- `starlink_results.Rmd` requires the two panel files and the three files under `data/processed/`.
+- `work_dataframe.Rmd` requires the raw provider inputs in section 2 and writes its intermediates to `data/processed/`.
+- The included INCRA and FBSP files are construction inputs and are not read by `starlink_results.Rmd`.
 
 Raw downloads go under `data/raw/<PROVIDER>/`, one folder per provider, named exactly as in section 2. After downloading, `data/raw/` looks like:
 
@@ -65,7 +70,7 @@ data/raw/
 ├── CNFP/         CNFP_2020.zip
 ├── DATASUS/      yearly mortality .csv / .zip files
 ├── DNIT/         202201B.zip, vw_cide_rod_2021.zip, BaseFerro.zip
-├── FAO-GAEZ/     soy yield .tif, fggd_pasture/
+├── FAO/          GAEZ soy-yield .tif, FGGD Map6_56.zip
 ├── FBSP/         amazon_factions_2023_2024.csv
 ├── FUNAI/        indigenous_area_legal_amazon.zip
 ├── IBAMA/        auto_infracao_csv.zip
@@ -81,11 +86,14 @@ data/raw/
 
 ## 2. Downloading datasets
 
-Most raw datasets are **not** included in this repository because of size and potential licensing concerns. The exact INCRA settlement archive is included because its source requires authenticated gov.br access; the hand-coded FBSP file is also included. Follow the instructions below for the remaining inputs and place each file in the folder named above. The pipeline checks all nineteen folders before it starts and stops with the list of any that are missing or empty.
+- The repository supplies all eighteen provider folders and the two CHC subfolders.
+- Raw provider files remain excluded except for `INCRA/Assentamento Brasil.zip` and `FBSP/amazon_factions_2023_2024.csv`.
+- The INCRA archive is included because its official download requires authenticated Brazilian gov.br credentials; the FBSP CSV is the hand-coded construction input.
+- Download the remaining inputs into the folders shown above. The pipeline stops before construction if any provider folder is missing or contains no input other than `.gitkeep`.
 
 > **Note for non-Portuguese speakers:** several datasets are hosted on Brazilian government portals whose interfaces are entirely in Portuguese. Step-by-step instructions in English are given for each of those.
 
-A file-level audit of the exact paths and date patterns selected by `work_dataframe.Rmd` totals **14.16 GiB across 302 source files** in the authors' collection. The externally obtained inputs occupy **14.12 GiB** because the included INCRA and FBSP inputs account for 50.2 MB. The largest required components are MapBiomas (6.61 GiB), CHIRTS/CHIRPS (3.09 GiB), ANATEL (1.15 GiB), and INPE (1.13 GiB). These are file-level totals, not provider-folder sizes: unrelated files stored beside the analysis inputs are not required.
+The required source paths total **14.16 GiB across 302 files**. The largest components are MapBiomas (6.61 GiB), CHIRTS/CHIRPS (3.09 GiB), ANATEL (1.15 GiB), and INPE (1.13 GiB). These totals exclude unrelated files stored in the same provider folders.
 
 ---
 
@@ -101,7 +109,7 @@ A file-level audit of the exact paths and date patterns selected by `work_datafr
 
 **Instructions:** direct download — save the `.zip` to `data/raw/IBGE/` without extracting; the scripts read from inside the archive.
 
-This layer is already clipped to the Legal Amazon boundary, which is why the 21 partially included Maranhão municipalities have a smaller area than their full territory. `starlink_results.Rmd` also reads it, for the variance-share map.
+This layer is already clipped to the Legal Amazon boundary. Its area field therefore contains clipped rather than full-territory area for 21 Maranhão municipalities.
 
 ---
 
@@ -131,7 +139,7 @@ This layer is already clipped to the Legal Amazon boundary, which is why the 21 
 | **Source**  | IBGE — Censo Demográfico 2022                                                        |
 | **License** | CC0                                                                                    |
 
-Used to estimate population inside the Legal Amazon portion of the 21 Maranhão municipalities the boundary cuts, by area overlay over census tracts.
+The pipeline overlays tract population on the Legal Amazon boundary for the 21 partially included Maranhão municipalities.
 
 **Instructions:** the pipeline downloads both automatically if absent. To fetch them by hand:
 
@@ -156,7 +164,7 @@ Use the **definitive** 2026-05-20 aggregates, not the 2024-03 preliminaries.
 
 1. Open the URL. The page is titled *Localidades do Brasil*.
 2. Scroll to **Localidades do Brasil - Municípios (kml)** and click **kml**.
-3. Save to `data/raw/IBGE/` without extracting. All municipal-seat coordinates and the distance-to-Brasília control come from this archive.
+3. Save to `data/raw/IBGE/` without extracting. The pipeline reads the municipal-seat and Brasília coordinates from the archive.
 
 ---
 
@@ -168,7 +176,11 @@ Use the **definitive** 2026-05-20 aggregates, not the 2024-03 preliminaries.
 | **URL**     | [https://www.ibge.gov.br/geociencias/organizacao-do-territorio/divisao-regional/15778-divisoes-regionais-do-brasil.html](https://www.ibge.gov.br/geociencias/organizacao-do-territorio/divisao-regional/15778-divisoes-regionais-do-brasil.html) |
 | **License** | CC0                                                                                                                                                                                                                                             |
 
-**Instructions:** open the URL, go to *por municípios das Regiões Geográficas Imediatas e Intermediárias do Brasil*, download the composition spreadsheet (XLSX) and save it to `data/raw/IBGE/` under the name above. This defines `microreg`, the cluster unit for every reported standard error.
+**Instructions:**
+
+- Open the URL and go to *por municípios das Regiões Geográficas Imediatas e Intermediárias do Brasil*.
+- Download the composition spreadsheet (XLSX) and save it to `data/raw/IBGE/` under the name above.
+- The pipeline writes the immediate-region code as `microreg`.
 
 ---
 
@@ -247,7 +259,7 @@ The tenure build reads these directly and is the longest stage of the pipeline.
 | **URL**     | [https://certificacao.incra.gov.br/csv_shp/export_shp.py](https://certificacao.incra.gov.br/csv_shp/export_shp.py) |
 | **License** | CC0                                                                                                               |
 
-The exact archive used for the analysis is supplied at `data/raw/INCRA/Assentamento Brasil.zip`. The official URL is retained for provenance, but downloading from it requires authenticated Brazilian gov.br credentials, which may be unavailable to foreign referees. Supplying the archive keeps the construction pipeline reproducible without requiring that account.
+The exact archive is supplied as `data/raw/INCRA/Assentamento Brasil.zip`. The official URL is retained for provenance but requires authenticated Brazilian gov.br credentials.
 
 ---
 
@@ -259,7 +271,11 @@ The exact archive used for the analysis is supplied at `data/raw/INCRA/Assentame
 | **URL**     | [https://www.gov.br/florestal/pt-br/assuntos/cadastro-nacional-de-florestas-publicas](https://www.gov.br/florestal/pt-br/assuntos/cadastro-nacional-de-florestas-publicas) |
 | **License** | CC0                                                                                                                                                                       |
 
-**Instructions:** open the URL, scroll down to **Atualizações**, click **Atualização 2020**, and then click **Download** on the page that opens. Save the archive as `CNFP_2020.zip` in `data/raw/CNFP/`, without extracting. The pipeline uses only TIPO B (undesignated) polygons.
+**Instructions:**
+
+- Open the URL, scroll to **Atualizações**, select **Atualização 2020**, and click **Download** on the page that opens.
+- Save the archive as `data/raw/CNFP/CNFP_2020.zip` without extracting it.
+- The pipeline retains only TIPO B (undesignated) polygons.
 
 ---
 
@@ -275,7 +291,7 @@ The exact archive used for the analysis is supplied at `data/raw/INCRA/Assentame
 
 **Instructions:** open the URL, find **Amazônia Legal — PRODES (Desmatamento)**, and download the yearly-deforestation shapefile for the **Legal Amazon** product. Save to `data/raw/INPE/` without extracting.
 
-This must be the *administrative Legal Amazon* product, not the Amazon-biome one: the estimation sample is the administrative region, matching DETER and the municipal panel. The Amazon-biome archive and the supplemental product for polygons smaller than 6.25 hectares are not used.
+Use the *administrative Legal Amazon* product. Do not download the Amazon-biome archive or the supplemental product for polygons smaller than 6.25 hectares.
 
 ---
 
@@ -287,7 +303,13 @@ This must be the *administrative Legal Amazon* product, not the Amazon-biome one
 | **URL**     | [https://terrabrasilis.dpi.inpe.br/downloads/](https://terrabrasilis.dpi.inpe.br/downloads/) |
 | **License** | CC BY-SA 4.0                                                                                |
 
-**Instructions:** use the September 2025 public DETER release shown above and save it to `data/raw/INPE/` without extracting. The pipeline reads `deter-amz-deter-public.shp` inside this archive. Its reusable `deter_map.RDS` clips alerts to the merged panel geography and dissolves them by municipality, year, and degradation class. It contains only fire scar, selective logging, and other degradation, never DETER deforestation classes. All three degradation classes are retained for 2022/2024 and fire scars for 2021--2024; the other municipality-time DETER files are aggregate tables without geometry. Later DETER vintages and the INPE `FireRisk` products are not inputs to this replication package.
+**Instructions:** save the September 2025 public release shown above to `data/raw/INPE/` without extracting it.
+
+- The pipeline reads `deter-amz-deter-public.shp` inside the archive.
+- It keeps only fire scar, selective logging, and other degradation. DETER deforestation classes are excluded.
+- It writes `deter_map.RDS` after clipping alerts to the panel geography and dissolving them by municipality, year, and degradation class.
+- `deter_map.RDS` retains all three classes for 2022 and 2024 and fire scars for 2021–2024. The other DETER intermediates are aggregate tables without geometry.
+- Do not substitute a later DETER release or an INPE `FireRisk` product.
 
 ---
 
@@ -299,7 +321,11 @@ This must be the *administrative Legal Amazon* product, not the Amazon-biome one
 | **URL**     | [https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/anual/Brasil_todos_sats/](https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/anual/Brasil_todos_sats/) |
 | **License** | CC BY-SA 4.0                                                                                                                                                                      |
 
-**Instructions:** open the annual **Brasil_todos_sats** directory, download `focos_br_todos-sats_YYYY.zip` for every year from 2019 through 2025, and save the archives to `data/raw/INPE/` without extracting. Fire ignitions are built by clustering these with `spotoroo`; the pipeline uses the NOAA-20, NPP-375 and NPP-375D sensors and excludes AQUA.
+**Instructions:**
+
+- Open the annual **Brasil_todos_sats** directory and download `focos_br_todos-sats_YYYY.zip` for every year from 2019 through 2025.
+- Save the archives to `data/raw/INPE/` without extracting them.
+- The pipeline retains NOAA-20, NPP-375, and NPP-375D observations, excludes AQUA, and clusters the retained observations with `spotoroo`.
 
 ---
 
@@ -331,8 +357,9 @@ https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/collection_10
 **Instructions:**
 
 1. For federal highways, open the SNV cloud directory, select `202201B.zip`,    and save it to `data/raw/DNIT/`. The surface field the scripts read is    `ds_sup_fed`.
-2. For state highways, open **VGeo** and select **Layers → Rodoviário →    Rodovias Estaduais**. Click the layer name, use its download button, retain the Shapefile format, and save the result as `vw_cide_rod_2021.zip` in `data/raw/DNIT/`. The surface field the scripts read is `Superficie`.
-3. Download the railway archive from its direct URL and save it as `BaseFerro.zip` in `data/raw/DNIT/`. Do not extract any of the three archives.
+2. For state highways, open **VGeo** and select **Layers → Rodoviário → Rodovias Estaduais**. Click the layer name, use its download button, retain the Shapefile format, and save the result as `vw_cide_rod_2021.zip` in `data/raw/DNIT/`.
+3. The state-road surface field read by the scripts is `Superficie`.
+4. Download the railway archive from its direct URL and save it as `BaseFerro.zip` in `data/raw/DNIT/`. Do not extract any of the three archives.
 
 ---
 
@@ -374,7 +401,7 @@ https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/collection_10
 
 **Instructions:** open the URL, under **Recursos** find *Dados de Acessos de Comunicação Multimídia*, click **Acessar o recurso**, and save the ZIP to `data/raw/ANATEL/` without extracting.
 
-This is the source of both the Starlink subscription counts (the treatment) and the other geostationary satellite providers used as a control.
+The pipeline reads Starlink and other geostationary-provider subscription series from this archive.
 
 ---
 
@@ -398,7 +425,7 @@ This is the source of both the Starlink subscription counts (the treatment) and 
 | **URL**     | [https://dados.gov.br/dados/conjuntos-dados/cobertura_movel](https://dados.gov.br/dados/conjuntos-dados/cobertura_movel) |
 | **License** | CC BY                                                                                                                   |
 
-**Instructions:** On the same page under **Recursos**, find *Áreas Cobertas* (Coverage Areas) and download the ZIP as `areas_cobertas.zip` to `data/raw/ANATEL/` without extracting it. This is for figure plotting only, as it is the most recent spatial mobile coverage dataset.
+**Instructions:** on the same page under **Recursos**, find *Áreas Cobertas* (Coverage Areas) and download the ZIP as `areas_cobertas.zip` to `data/raw/ANATEL/` without extracting it. The pipeline reads the polygon geometry directly from this archive.
 
 ---
 
@@ -432,7 +459,12 @@ This is the source of both the Starlink subscription counts (the treatment) and 
 | **URLs**    | [https://data.chc.ucsb.edu/experimental/CHIRTS-ERA5/tmax/tifs/monthly/](https://data.chc.ucsb.edu/experimental/CHIRTS-ERA5/tmax/tifs/monthly/)  [https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/latam/tifs/](https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/latam/tifs/) |
 | **License** | CC BY 4.0                                                                                                                                                                                                                                                                              |
 
-**Instructions:** download the 108 monthly GeoTIFFs for each product from **August 2016 through July 2025**. Put CHIRTS-ERA5 files in `data/raw/CHC/CHIRTS-ERA5_Tmax/` and CHIRPS files in `data/raw/CHC/CHIRPS-v3_latam/`. Keep the `.tif` or `.tiff` extensions as published. This range is the exact union required for calendar years 2017–2024 and August–July PRODES years 2017–2025; files outside it are ignored.
+**Instructions:**
+
+- Download the 108 monthly GeoTIFFs for each product from August 2016 through July 2025.
+- Put CHIRTS-ERA5 files in `data/raw/CHC/CHIRTS-ERA5_Tmax/` and CHIRPS files in `data/raw/CHC/CHIRPS-v3_latam/`.
+- Keep the `.tif` or `.tiff` extensions as published.
+- Files outside this date range are ignored.
 
 #### 2.22a Copernicus ERA5-Drought SPEI-12
 
@@ -464,12 +496,14 @@ Submit the request, download the resulting ZIP of monthly NetCDF files, and save
 | **URL**     | [https://dados.gov.br/dados/conjuntos-dados/sim-1979-2019](https://dados.gov.br/dados/conjuntos-dados/sim-1979-2019) |
 | **License** | CC BY-ND 3.0                                                                                                        |
 
-**Instructions:** open the URL, and under **Recursos** download *Mortalidade Geral* for each year 2017–2024. Provider filenames and whether the download is already compressed can differ by year. Arrange the files in `data/raw/DATASUS/` as follows so they match the names read by the pipeline:
+**Instructions:** open the URL and, under **Recursos**, download *Mortalidade Geral* for each year from 2017 through 2024. Arrange the files in `data/raw/DATASUS/` as follows:
 
 - 2017–2021: `Mortalidade_Geral_YYYY_csv.zip`, containing   `Mortalidade_Geral_YYYY.csv`.
 - 2022–2024: `DOYYOPEN_csv.zip`, containing `DOYYOPEN.csv`, where `YY` is the two-digit year.
 
-If a CSV is downloaded uncompressed, place it in a ZIP archive with the corresponding name above. If the provider supplies the same contents under a different archive name, rename the archive. Do not rename the CSV inside it to anything other than the corresponding name above.
+- If a CSV is uncompressed, place it in a ZIP archive with the corresponding name above.
+- If the archive has a different provider filename, rename only the archive.
+- Keep the internal CSV name shown above.
 
 ---
 
@@ -477,13 +511,18 @@ If a CSV is downloaded uncompressed, place it in a ZIP archive with the correspo
 
 #### 2.24 Soy yield potential and pasture suitability
 
-| **Files**   | `FAO-GAEZ/DATA_GAEZ-V5_MAPSET_RES05-YXX_GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif`, `FAO-GAEZ/fggd_pasture/`                                                                                                                                                                                                                                                                                                                            |
+| **Files**   | `FAO/DATA_GAEZ-V5_MAPSET_RES05-YXX_GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif`, `FAO/Map6_56.zip`                                                                                                                                                                                                                                                                                                                                             |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Source**  | FAO — Global Agro-Ecological Zones v5, and FGGD pasture suitability                                                                                                                                                                                                                                                                                                                                                                                |
+| **Source**  | FAO Global Agro-Ecological Zones v5 (soy) and FGGD pasture suitability                                                                                                                                                                                                                                                                                                                                                                               |
 | **URLs**    | Soy:[https://storage.googleapis.com/fao-gismgr-gaez-v5-data/DATA/GAEZ-V5/MAPSET/RES05-YXX/GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif](https://storage.googleapis.com/fao-gismgr-gaez-v5-data/DATA/GAEZ-V5/MAPSET/RES05-YXX/GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif)  Pasture: [https://data.fao.org/catalog/dataset/2b357400-891a-11db-b9b2-000d939bc5d8](https://data.fao.org/catalog/dataset/2b357400-891a-11db-b9b2-000d939bc5d8) |
 | **License** | CC BY-NC-SA 3.0 IGO                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
-**Instructions:** download the soy raster and save it to `data/raw/FAO-GAEZ/` as `DATA_GAEZ-V5_MAPSET_RES05-YXX_GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif`. For pasture suitability, download `Map6_56.zip` (**Suitability of global land area for pasture**) from the FAO catalog. Extract it under `data/raw/FAO-GAEZ/fggd_pasture/` so the ArcInfo grid is located at `fggd_pasture/pasture_si/` and its sibling `fggd_pasture/info/` directory is retained. Both are heterogeneity splitters, not controls.
+**Instructions:**
+
+- Download the soy raster as `data/raw/FAO/DATA_GAEZ-V5_MAPSET_RES05-YXX_GAEZ-V5.RES05-YXX.HP0120.AGERA5.HIST.SOY.HRLM.tif`.
+- Download `Map6_56.zip` (**Suitability of global land area for pasture**) from the FGGD catalog and save it unchanged as `data/raw/FAO/Map6_56.zip`.
+- Do not extract `Map6_56.zip`; the builder reads `pasture_si/hdr.adf` through GDAL's `/vsizip/` virtual filesystem.
+- The pasture product is from FGGD, not GAEZ.
 
 ---
 
@@ -498,8 +537,11 @@ If a CSV is downloaded uncompressed, place it in a ZIP archive with the correspo
 
 **Instructions:**
 
-1. Open the **Price reports page**. In the first section, **Cotação diária**, click **Histórico** beside **Cotação Atual**. Do not use either **Histórico** link under **Preços Recebidos pelo Produtor** or **Preços de Venda no Atacado e no Varejo**; those are different monthly series.
-2. Download the nine annual archives from the **Histórico Sima** page and rename only the archive, following the table below. Save all nine directly in `data/raw/SEAB-PR/`. Do not extract them, create year subfolders, or change their file formats; in particular, keep the 2016 and 2017 files as RAR archives.
+1. Open the **Price reports page**.
+2. In the first section, **Cotação diária**, click **Histórico** beside **Cotação Atual**.
+3. Do not use the **Histórico** links under **Preços Recebidos pelo Produtor** or **Preços de Venda no Atacado e no Varejo**; those are different monthly series.
+4. Download the nine annual archives from the **Histórico Sima** page and rename only the archive as shown below.
+5. Save all nine directly in `data/raw/SEAB-PR/`. Do not extract them or create year subfolders. Keep the 2016 and 2017 files in RAR format.
 
 | Year | Downloaded filename and direct link                                                                                                    | Rename to         |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
@@ -513,8 +555,9 @@ If a CSV is downloaded uncompressed, place it in a ZIP archive with the correspo
 | 2023 | [`2023_1.zip`](https://www.agricultura.pr.gov.br/sites/default/arquivos_restritos/files/documento/2023-12/2023_1.zip)                 | `sima_2023.zip` |
 | 2024 | [`historico_2024.zip`](https://www.agricultura.pr.gov.br/sites/default/arquivos_restritos/files/documento/2025-03/historico_2024.zip) | `sima_2024.zip` |
 
-3. The `archive` R package extracts each archive into the R session's temporary directory, including the two RAR files, and deletes the temporary copy after parsing that year. The validated 2024 archive contains 242 workbooks; the pipeline uses 241 after excluding the `31-07-2024-impressao.xls` print duplicate.
-4. The pipeline reads the internal `.xls`, `.xlsx`, and `.xlsm` files recursively, removes `-impressao` print copies and files marked `Copia` or `Cópia`, and retains the daily quotations for **Boi, Soja, Mandioca, Arroz, and Milho** used to construct the cattle and soy price controls.
+6. The `archive` R package extracts each archive into the R session's temporary directory and deletes the temporary copy after parsing that year.
+7. The validated 2024 archive contains 242 workbooks; the pipeline retains 241 after excluding `31-07-2024-impressao.xls`.
+8. The pipeline reads `.xls`, `.xlsx`, and `.xlsm` files recursively, removes `-impressao` print copies and files marked `Copia` or `Cópia`, and retains daily quotations for **Boi, Soja, Mandioca, Arroz, and Milho**.
 
 ---
 
@@ -525,7 +568,10 @@ If a CSV is downloaded uncompressed, place it in a ZIP archive with the correspo
 | **Source**  | IBGE — SIDRA table 1737, variable 63   |
 | **License** | CC0                                     |
 
-Fetched directly from the SIDRA API by `work_dataframe.Rmd` for January 2016 through December 2024 and cached with the other raw IBGE inputs. The pipeline uses it to deflate nominal SEAB-PR prices and merges the resulting current and one-year-lagged real price levels into the final panels. Prices are in December 2024 BRL. Delete the CSV only when deliberately refreshing the source vintage.
+- `work_dataframe.Rmd` fetches SIDRA table 1737, variable 63, for January 2016 through December 2024 when the CSV is absent.
+- The downloaded CSV is cached under `data/raw/IBGE/`.
+- SEAB-PR prices are converted to December 2024 BRL before current and one-year-lagged values are joined to the panels.
+- Delete the CSV only to fetch the source again.
 
 ---
 
@@ -539,7 +585,13 @@ Fetched directly from the SIDRA API by `work_dataframe.Rmd` for January 2016 thr
 | **URL**     | [https://forumseguranca.org.br/publicacoes/](https://forumseguranca.org.br/publicacoes/) |
 | **License** | CC BY 4.0                                                                               |
 
-**Construction:** the included CSV records municipal faction presence from the 2023 and 2024 editions, with one row per municipality, faction, and report year. The pipeline pools the two editions into a single time-invariant indicator: a municipality is classified as faction-present in every panel year if either edition documents a faction there. The `report_year` column is retained for provenance and is not used to create a time-varying measure. No transcription from the reports is required to run the replication. Only verbatim explicit alliance statements are coded; co-occurrence is not treated as evidence of alliance.
+**Construction:**
+
+- The included CSV has one row per municipality, faction, and report year from the 2023 and 2024 editions.
+- The pipeline pools both editions into one time-invariant municipal indicator.
+- `report_year` is retained for provenance and does not create a time-varying series.
+- Alliance fields contain only explicit statements from the reports; co-occurrence is not coded as an alliance.
+- No report transcription is required to run the pipeline.
 
 ---
 
@@ -550,25 +602,26 @@ Fetched directly from the SIDRA API by `work_dataframe.Rmd` for January 2016 thr
 3. **Check `DATA_DIR` and `DRAW`** at the top of `work_dataframe.Rmd`, and `DATA_DIR` in `starlink_results.Rmd`. If the raw downloads already exist somewhere, point `DRAW` there instead of copying them. Nothing else needs editing.
 4. **Verify the pinned DETER input** is named `deter-amz-public-2025set01.zip` as specified in section 2.13; do not substitute another vintage.
 5. **Build the panels** by knitting `code/work_dataframe.Rmd`. Allow many hours and roughly 32 GB of RAM; the SICAR tenure build alone runs for hours. Worker counts are set by `max_workers` in chunk 0.
-6. **Produce the selected results** by knitting `code/starlink_results.Rmd`. One knit reads the included panels (or the ones rebuilt in step 5) and renders every table and figure into `code/starlink_results.html`. There are no parameters or active render variants.
+6. **Render the outputs** by knitting `code/starlink_results.Rmd`. One knit reads the included panels and processed spatial files and writes every table and figure to `code/starlink_results.html`. There are no parameters or active render variants.
 
-Step 6 alone reproduces every number in the paper from the included panels, so a reader who only wants the tables can skip steps 2, 4 and 5.
+To render from the included files, run only step 6. Steps 2, 4, and 5 are required only to rebuild the panels and processed spatial files.
 
-Step 6 took about 4 minutes on a 24-core, 64 GB Windows machine. The leave-one-out sweeps re-estimate every outcome once per dropped unit and run on up to 16 parallel workers (by default, one less than the machine's logical cores); set `STARLINK_ROBUST_MAX_WORKERS` to change that. Each worker needs about 110 MB, but the main R session peaks at about 14 GB, so allow roughly 16 GB of free memory.
+- Observed render time: about 4 minutes on a 24-core, 64 GB Windows machine.
+- Parallel limit: up to 16 workers by default, or one fewer than the available logical cores when fewer are available.
+- Override: set `STARLINK_ROBUST_MAX_WORKERS`.
+- Memory: allow about 16 GB free; the main R session peaks near 14 GB and each worker uses about 110 MB.
 
-## 4. Sample definition
+## 4. Panel coverage and units
 
-The main results use the calendar-year panel, which covers 2017–2024 and has a January 2022 to December 2024 treatment period. The separate PRODES-year panel is used only for the appendix analysis of native PRODES deforestation polygons of 6.25 ha or larger. This appendix panel uses August-to-July years and ends with PRODES year 2025, which closes in July 2025. Nothing from August 2025 onward enters either panel.
-
-The appendix PRODES-year panel contains six native municipal outcomes in both polygon counts and mapped area: total deforestation, combined clear-cut, clear-cut with exposed soil, clear-cut with vegetation, deforestation by progressive degradation, and mining-pattern deforestation. All polygons meet PRODES's 6.25 ha minimum mapping unit. This panel does not construct August--July versions of DETER degradation, enforcement, pollution, mortality, MapBiomas transitions, ignition, dispersion, or heterogeneity outcomes. Those analyses use the main calendar-year panel only.
-
-Outcomes are normalized by municipal **forest** area. The headline degradation outcome is DETER alert counts (flags), reported per 100 km². Degraded area is retained as supporting evidence.
-
-Mojuí dos Campos was split from Santarém in 2013 and is merged back into it throughout, giving 772 minimum-comparable units against the 773 polygons the IBGE shapefile ships.
+- `dataset_normalyr.RDS` covers calendar years 2017–2024.
+- `dataset_prodesyr.RDS` covers August–July PRODES years 2017–2025. `starlink_results.Rmd` reads this panel only in its appendix block.
+- The PRODES input is the administrative Legal Amazon product and excludes polygons smaller than 6.25 hectares. No observation after July 2025 enters either panel.
+- Mojuí dos Campos is merged into Santarém, reducing the 773 source polygons to 772 comparable municipal units.
 
 ## 5. Session info
 
-Recorded from the machine that produced the shipped results. Versions matter most for `sf`, which sits on GEOS/GDAL: a version change there can move geometry results slightly. In particular, the cross-source road de-duplication samples points against a 50 m buffer, and its split between municipalities is approximate — totals are exact, but the per-municipality allocation can shift by around a tenth of a percent across GEOS versions.
+- The versions below were recorded on the machine that produced the included outputs.
+- Changes to the GEOS/GDAL versions used by `sf` can shift the municipal allocation of de-duplicated road length by about 0.1%; total length remains unchanged.
 
 ```
 R 4.4.3 (Windows)
@@ -581,17 +634,22 @@ Parallel:   future, future.apply, tictoc
 Output:     knitr, kableExtra, ggplot2, ggpubr, ggnewscale, patchwork, scales
 ```
 
-`archive` is used to extract the compressed SEAB-PR annual files into the R session's temporary directory. `httr` and `jsonlite` are used only for the one-off SIDRA deflator fetch.
+- `archive` extracts the SEAB-PR annual files into the R session's temporary directory.
+- `httr` and `jsonlite` fetch the SIDRA deflator when its cached CSV is absent.
 
 ## 6. Notes on the data
 
-`dataset_normalyr.RDS`, the main-results panel, has 103 columns: the previous 99-column contract plus contemporaneous and one-year-lagged real soybean and cattle prices. `dataset_prodesyr.RDS`, used only in the appendix, has 37 columns: the previous 35-column contract plus the two lagged real price controls. Both carry the full variable names. The `.dta` twins the pipeline also writes are abbreviated — Stata caps variable names at 32 characters — so the `.RDS` files are authoritative and are what the results script reads.
+- `dataset_normalyr.RDS` has 103 columns, including current and one-year-lagged real soybean and cattle prices.
+- `dataset_prodesyr.RDS` has 37 columns, including one-year-lagged real soybean and cattle prices.
+- The `.RDS` panels retain full variable names and are read by `starlink_results.Rmd`. The `.dta` copies use abbreviated names because Stata limits names to 32 characters.
+- MapBiomas extraction uses pixel counts and materializes the seven transition columns read by `starlink_results.Rmd`; see chunk 10 of the builder.
+- The three map files under `data/processed/` retain municipal geometry, 2021 mobile-coverage geometry, and DETER polygons dissolved by municipality, year, and alert class.
+- The aggregated municipality-month and municipality-year DETER files cannot replace `deter_map.RDS` because they contain no polygon geometry.
 
-MapBiomas land-cover extraction uses pixel counts rather than area-weighted coverage. The area-weighted validation covered forest area and all nine originally considered transitions and gives the same results. The replication pipeline constructs only the seven transition outcomes still used by `starlink_results.Rmd`. See the note in chunk 10 of the pipeline.
+Road de-duplication removes 3.9% of drivable road length:
 
-The maps use three compact spatial inputs in `data/processed/`: the panel-matched municipal geometry, the reusable 2021 mobile-coverage layer, and one reusable DETER layer dissolved by municipality, year, and alert class. Starlink rates and SPEI values come from the calendar panel. The municipality-month and municipality-year DETER intermediates cannot replace `deter_map.RDS` because aggregation removes polygon geometry.
-
-Road kilometres are de-duplicated twice: within each source, where one roadbed carrying several BR designations is stored once per designation with identical geometry; and across sources, where a state road running within 50 m of a federal line for at least 300 m is dropped in favour of the federal record. Together these remove 3.9% of drivable kilometres.
+- Within each source, identical geometries with multiple road designations are counted once.
+- Across sources, a state segment is removed when it runs within 50 m of a federal line for at least 300 m.
 
 ## License
 
