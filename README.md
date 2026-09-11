@@ -12,7 +12,7 @@ code/work_dataframe.Rmd     raw provider files  ->  the two analysis panels
 code/starlink_results.Rmd   the panels          ->  every table and figure
 ```
 
-The selected specification in `code/starlink_results.Rmd` includes GEO subscriptions and Copernicus ERA5-Drought SPEI-12. The panel-construction script calls `code/spei_copernicus_era5.R` to create the December/calendar and July/PRODES-year municipal anchors. The vertical 2022/2024 map is built inline in the results script.
+The selected specification in `code/starlink_results.Rmd` includes GEO subscriptions and Copernicus ERA5-Drought SPEI-12. The panel-construction script extracts the December/calendar and July/PRODES-year municipal SPEI-12 anchors in its section 8. The vertical 2022/2024 map is built inline in the results script.
 
 Both resolve every path relative to their own folder, so the package can sit anywhere. Two settings near the top of `work_dataframe.Rmd` control where data is read from and written to:
 
@@ -38,7 +38,6 @@ code/
   work_dataframe.Rmd         raw provider files -> the two analysis panels
   starlink_results.Rmd       the panels -> every table and figure
   starlink_results.html      rendered output, read it without running anything
-  spei_copernicus_era5.R     called by work_dataframe.Rmd for the SPEI anchors
 data/
   dataset_normalyr.RDS       calendar panel, Jan 2022 - Dec 2024      committed
   dataset_prodesyr.RDS       compact native-PRODES panel, 2017-2025   committed
@@ -66,11 +65,10 @@ data/raw/
 ├── ANA/          geoft_bho_2017_linha_costa.gpkg
 ├── ANATEL/       cobertura_movel.zip, areas_cobertas.zip,
 │                 acessos_banda_larga_fixa.zip
-├── CAMS-EAC4/    data_sfc.nc
+├── CAMS/         data_sfc.nc, SPEI-12_Amazon_2017_2025.zip
 ├── CHC/
 │   ├── CHIRPS-v3_latam/      monthly precipitation `.tif`/`.tiff` files
 │   └── CHIRTS-ERA5_Tmax/     monthly maximum-temperature `.tif` files
-├── Copernicus/   SPEI-12_Amazon_2017_2025.zip
 ├── CNFP/         CNFP_2020.zip
 ├── DATASUS/      yearly mortality .csv / .zip files
 ├── DNIT/         202201B.zip, vw_cide_rod_2021.zip, BaseFerro.zip
@@ -414,7 +412,7 @@ This is the source of both the Starlink subscription counts (the treatment) and 
 
 #### 2.21 CAMS particulate-matter reanalysis
 
-| **File** | `CAMS-EAC4/data_sfc.nc` |
+| **File** | `CAMS/data_sfc.nc` |
 |---|---|
 | **Source** | Copernicus Atmosphere Monitoring Service (CAMS) |
 | **URL** | <https://ads.atmosphere.copernicus.eu/datasets/cams-global-reanalysis-eac4?tab=download> |
@@ -429,7 +427,7 @@ This is the source of both the Starlink subscription counts (the treatment) and 
 5. Under **Geographical area**, choose **Sub-region extraction**: 6°N to −19°S,    −75°W to −43°W.
 6. Under **Format**, choose **Zipped netCDF (experimental)**.
 7. Submit; processing can take an hour. Download and unzip to
-   `data/raw/CAMS-EAC4/data_sfc.nc`.
+   `data/raw/CAMS/data_sfc.nc`.
 
 ---
 
@@ -445,7 +443,7 @@ This is the source of both the Starlink subscription counts (the treatment) and 
 
 #### 2.22a Copernicus ERA5-Drought SPEI-12
 
-| **File** | `Copernicus/SPEI-12_Amazon_2017_2025.zip` |
+| **File** | `CAMS/SPEI-12_Amazon_2017_2025.zip` |
 |---|---|
 | **Source** | Copernicus Climate Data Store, ERA5-Drought monthly indices |
 | **Dataset** | [Monthly drought indices from 1940 to present derived from ERA5 reanalysis](https://cds.climate.copernicus.eu/datasets/derived-drought-historical-monthly?tab=download) |
@@ -459,17 +457,13 @@ This is the source of both the Starlink subscription counts (the treatment) and 
 - **Dataset type:** Consolidated dataset.
 - **Years:** 2017 through 2025.
 - **Months:** January through December.
-- **Geographical area:** Sub-region extraction, using the same coordinates as the CAMS particulate-matter request: 6°N to 19°S and 75°W to 43°W.
+- Under **Geographical area**, choose **Sub-region extraction**: 6°N to −19°S,    −75°W to −43°W.
 
-Submit the request, download the resulting ZIP of monthly NetCDF files, and save it to `data/raw/Copernicus/` as `SPEI-12_Amazon_2017_2025.zip` without extracting it.
+Submit the request, download the resulting ZIP of monthly NetCDF files, and save it to `data/raw/CAMS/` as `SPEI-12_Amazon_2017_2025.zip` without extracting it.
 
-The archive contains monthly 0.25-degree NetCDF files. Copernicus derives the index from ERA5 reanalysis using Penman--Monteith potential evapotranspiration and a 1991--2020 reference period. The panel pipeline calls the extractor for SPEI-12. It reads the archive inventory and temporarily unpacks only the 17 December/calendar and July/PRODES endpoint files needed by the two panels. This avoids unpacking the full archive and avoids GDAL NetCDF auxiliary-metadata errors observed with direct `/vsizip/` access.
+The archive contains monthly 0.25-degree NetCDF files. Copernicus derives the index from ERA5 reanalysis using Penman--Monteith potential evapotranspiration and a 1991--2020 reference period. Section 8 of `code/work_dataframe.Rmd` extracts SPEI-12. It reads the archive inventory and temporarily unpacks only the 17 December/calendar and July/PRODES endpoint files needed by the two panels. This avoids unpacking the full archive and avoids GDAL NetCDF auxiliary-metadata errors observed with direct `/vsizip/` access.
 
-```
-Rscript code/spei_copernicus_era5.R 12
-```
-
-The extractor writes `spei12_copernicus_era5_normalyr.RDS` and `spei12_copernicus_era5_prodesyr.RDS` to `data/processed/`. The selected results script uses the December anchor for January--December outcomes and the July anchor for August--July PRODES-year outcomes. Exploratory MERRA, SPEI-6, and BR-DWGD tests are retained only under `code/archive/spei_tests_2026-09-01/` and are not part of the active workflow.
+The extraction writes `spei12_copernicus_era5_normalyr.RDS` and `spei12_copernicus_era5_prodesyr.RDS` to `data/processed/`. The selected results script uses the December anchor for January--December outcomes and the July anchor for August--July PRODES-year outcomes.
 
 ---
 
@@ -549,7 +543,7 @@ Fetched automatically from the SIDRA API by `work_dataframe.Rmd` for January 201
 3. **Check `DATA_DIR` and `DRAW`** at the top of `work_dataframe.Rmd`, and    `DATA_DIR` in `starlink_results.Rmd`. If the raw downloads already exist    somewhere, point `DRAW` there instead of copying them. Nothing else needs editing.
 4. **Set `DETER_shp`** in chunk 0 of `work_dataframe.Rmd` to the DETER filename you downloaded (2.13).
 5. **Build the panels** by knitting `code/work_dataframe.Rmd`. Allow many hours    and roughly 32 GB of RAM; the SICAR tenure build alone runs for hours. Worker counts are set by `max_workers` in chunk 0.
-6. **Produce the selected results** by knitting `code/starlink_results.Rmd`. One knit reads the Copernicus SPEI-12 anchors created in step 5 and writes all tables and figures into `manuscript/tables/` and `manuscript/figs/`. There are no parameters or active render variants.
+6. **Produce the selected results** by knitting `code/starlink_results.Rmd`. One knit reads the committed panels and SPEI-12 anchors (or the ones rebuilt in step 5) and renders every table and figure into `code/starlink_results.html`. There are no parameters or active render variants.
 
 Step 6 alone reproduces every number in the paper from the committed panels, so a reader who only wants the tables can skip steps 2, 4 and 5.
 

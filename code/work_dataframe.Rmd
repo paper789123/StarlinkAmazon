@@ -116,8 +116,8 @@ for (folder in c(DV, DS, DFINAL)) {
 # Each entry is a provider folder under data/raw/; README.md lists what belongs
 # in each and where to download it.
 raw_providers = c(
-  "ANA", "ANATEL", "CAMS-EAC4", "CHC", "CNFP", "DATASUS", "DNIT", "FAO-GAEZ",
-  "Copernicus", "FBSP", "FUNAI", "IBAMA", "IBGE", "ICMBio", "INCRA", "INPE", "MapBiomas",
+  "ANA", "ANATEL", "CAMS", "CHC", "CNFP", "DATASUS", "DNIT", "FAO-GAEZ",
+  "FBSP", "FUNAI", "IBAMA", "IBGE", "ICMBio", "INCRA", "INPE", "MapBiomas",
   "SEAB-PR", "SICAR"
 )
 missing_raw = raw_providers[
@@ -3426,7 +3426,7 @@ for (PM_SIZE in c("1", "2.5", "10")) {
   PM_clean = sub("\\.", "", PM_SIZE)
 
   # Read layer metadata only (dates)
-  aux = rast(paste0(DRAW, "CAMS-EAC4/data_sfc.nc"), subds = paste0("pm", N))
+  aux = rast(paste0(DRAW, "CAMS/data_sfc.nc"), subds = paste0("pm", N))
   dates = time(aux)
   stopifnot(length(dates) == nlyr(aux), !anyNA(dates))
 
@@ -3514,7 +3514,7 @@ amz_nogeo = zones[[1]]$zone %>% st_drop_geometry() %>% select(codmun)
       # Each worker reloads the raster (terra is not serializable), but projects
       # only its assigned temporal chunk. Projecting the full stack here would
       # repeat the same expensive work once for every chunk.
-      r = rast(paste0(DRAW, "CAMS-EAC4/data_sfc.nc"), subds = paste0("pm", N))
+      r = rast(paste0(DRAW, "CAMS/data_sfc.nc"), subds = paste0("pm", N))
 
       all_dates = time(r)
       stopifnot(length(all_dates) == nlyr(r), !anyNA(all_dates))
@@ -3655,7 +3655,7 @@ for (PM_SIZE in c("1", "2.5", "10")) {
   N = gsub(".", "p", PM_SIZE, fixed = TRUE)
   PM_clean = gsub(".", "", PM_SIZE, fixed = TRUE)
   r_boundary = rast(
-    paste0(DRAW, "CAMS-EAC4/data_sfc.nc"),
+    paste0(DRAW, "CAMS/data_sfc.nc"),
     subds = paste0("pm", N)
   )
   dates_boundary = time(r_boundary)
@@ -3908,66 +3908,151 @@ rm(prcp, prcp_list, bbox, amz_nogeo, sum_coverage, extract_raster_file)
 ## 8. SPEI-12 (Copernicus ERA5-Drought)
 
 ```{r 8}
-# The selected drought control is the deterministic Copernicus ERA5-Drought
-# SPEI-12 product. Its provider calculation uses ERA5 reanalysis and
-# Penman--Monteith PET. The standalone extractor reads only the December and
-# July endpoint files needed for the calendar and PRODES-year panels, projects
-# them to the common Albers CRS, and computes coverage-area-weighted municipal
-# values. Run it in a clean R process so its parallel plan and package state do
-# not leak into this long data-construction session.
-spei_script = file.path(code_dir, "spei_copernicus_era5.R")
-spei_zip_candidates = file.path(
-  DRAW,
-  "Copernicus",
-  c(
-    "SPEI-12_Amazon_2017_2025.zip",
-    "SPEI-12_Amazon_2016_2025.zip", # earlier compact archive
-    "SPEI-6-12_Amazon_1940_2025.zip" # legacy shared archive
+# Drought control: Copernicus ERA5-Drought SPEI-12 (DOI 10.24381/9bea5e16).
+# The provider computes it from ERA5 reanalysis with Penman--Monteith PET and a
+# 1991--2020 reference period. The panels use one endpoint month per year:
+# December for calendar years 2017--2024 and July for PRODES years 2017--2025.
+# Each endpoint file is cropped to the Legal Amazon, projected to the municipal
+# CRS, and averaged over each municipality with coverage-area weights.
+spei_zip = paste0(DRAW, "CAMS/SPEI-12_Amazon_2017_2025.zip")
+stopifnot(file.exists(spei_zip), file.exists(paste0(DV, "mun_zone.RDS")))
+
+# The archive holds one NetCDF per month, named ..._ref1991to2020_YYYYMM....nc
+spei_members = tibble(member = unzip(spei_zip, list = TRUE)$Name) %>%
+  filter(grepl("^SPEI12_", member)) %>%
+  mutate(
+    year_month = sub(".*_ref1991to2020_([0-9]{6}).*", "\\1", member),
+    year = as.integer(substr(year_month, 1, 4)),
+    month = as.integer(substr(year_month, 5, 6))
   )
-)
-spei_zip = spei_zip_candidates[file.exists(spei_zip_candidates)][1]
 stopifnot(
-  file.exists(spei_script),
-  length(spei_zip) == 1,
-  !is.na(spei_zip),
-  file.exists(file.path(DV, "mun_zone.RDS"))
+  !anyNA(spei_members$year),
+  !anyNA(spei_members$month),
+  !anyDuplicated(spei_members[c("year", "month")])
 )
 
-spei_env = c(
-  paste0(
-    "STARLINK_SPEI_DATA_DIR=",
-    normalizePath(DFINAL, winslash = "/", mustWork = TRUE)
-  ),
-  paste0(
-    "STARLINK_SPEI_OUTPUT_DIR=",
-    normalizePath(DV, winslash = "/", mustWork = TRUE)
-  ),
-  paste0(
-    "STARLINK_SPEI_MUN_ZONE_RDS=",
-    normalizePath(
-      file.path(DV, "mun_zone.RDS"),
-      winslash = "/",
-      mustWork = TRUE
-    )
-  ),
-  paste0(
-    "STARLINK_COPERNICUS_SPEI_ZIP=",
-    normalizePath(spei_zip, winslash = "/", mustWork = TRUE)
-  ),
-  paste0("SPEI_COPERNICUS_MAX_WORKERS=", max_workers)
+spei_tasks = bind_rows(
+  spei_members %>%
+    filter(month == 12, year >= 2017, year <= 2024) %>%
+    mutate(anchor = "dec"),
+  spei_members %>%
+    filter(month == 7, year >= 2017, year <= 2025) %>%
+    mutate(anchor = "jul")
+) %>%
+  arrange(anchor, year)
+stopifnot(
+  sum(spei_tasks$anchor == "dec") == 8,
+  sum(spei_tasks$anchor == "jul") == 9
 )
-spei_status = system2(
-  file.path(R.home("bin"), "Rscript"),
-  args = c(shQuote(normalizePath(spei_script, winslash = "/")), "12"),
-  env = spei_env
-)
-stopifnot(identical(as.integer(spei_status), 0L))
+
+# GDAL can read zip members through /vsizip/, but its NetCDF driver raises
+# NCpathcvt errors when it looks for auxiliary metadata inside a compressed
+# member. Unzip only the 17 endpoint files to a temporary folder instead.
+spei_dir = tempfile("spei12_")
+dir.create(spei_dir)
+unzip(spei_zip, files = spei_tasks$member, exdir = spei_dir)
+spei_tasks$path = file.path(spei_dir, spei_tasks$member)
+stopifnot(all(file.exists(spei_tasks$path)))
+
+spei_mun = readRDS(paste0(DV, "mun_zone.RDS")) %>%
+  select(codmun) %>%
+  arrange(codmun)
+stopifnot(nrow(spei_mun) == 772, n_distinct(spei_mun$codmun) == 772)
+spei_crs = st_crs(spei_mun)$wkt
+spei_bbox = st_bbox(st_transform(spei_mun, 4326)) + c(-0.5, -0.5, 0.5, 0.5)
+
+# Coverage-area-weighted mean over the cells with a valid SPEI value
+spei_weighted_mean = function(values, coverage_area) {
+  valid = is.finite(values) & is.finite(coverage_area) & coverage_area > 0
+  if (!any(valid)) {
+    return(NA_real_)
+  }
+  sum(values[valid] * coverage_area[valid]) / sum(coverage_area[valid])
+}
+
+# One task per endpoint file. terra rasters cannot be sent to workers, so each
+# worker reads its own file from disk.
+extract_spei_file = function(i) {
+  library(terra)
+  library(exactextractr)
+  library(sf)
+  library(dplyr)
+
+  spei = rast(spei_tasks$path[i]) %>%
+    crop(ext(spei_bbox))
+  # -9999 is the only fill value. Finite extreme values are part of the
+  # provider's fitted index and are kept.
+  spei[spei <= -9990] = NA
+  spei = project(spei, spei_crs)
+
+  tibble(
+    codmun = as.numeric(spei_mun$codmun),
+    year = spei_tasks$year[i],
+    anchor = spei_tasks$anchor[i],
+    spei = as.numeric(exact_extract(
+      spei,
+      spei_mun,
+      spei_weighted_mean,
+      coverage_area = TRUE,
+      progress = FALSE
+    ))
+  )
+}
+
+tictoc::tic("SPEI-12 extraction")
+options(future.globals.maxSize = 2 * 1024^3)
+plan(multisession, workers = min(max_workers, nrow(spei_tasks)))
+spei_anchors = future_lapply(
+  seq_len(nrow(spei_tasks)),
+  extract_spei_file,
+  future.seed = TRUE
+) %>%
+  bind_rows()
+plan(sequential)
+tictoc::toc()
+unlink(spei_dir, recursive = TRUE)
 
 stopifnot(
-  file.exists(file.path(DV, "spei12_copernicus_era5_normalyr.RDS")),
-  file.exists(file.path(DV, "spei12_copernicus_era5_prodesyr.RDS"))
+  all(is.finite(spei_anchors$spei)),
+  all(abs(spei_anchors$spei) < 100)
 )
-rm(spei_script, spei_zip_candidates, spei_zip, spei_env, spei_status)
+
+spei12_normalyr = spei_anchors %>%
+  filter(anchor == "dec") %>%
+  transmute(codmun, year, spei12_dec = spei) %>%
+  arrange(codmun, year)
+spei12_prodesyr = spei_anchors %>%
+  filter(anchor == "jul") %>%
+  transmute(codmun, year, spei12_jul = spei) %>%
+  arrange(codmun, year)
+stopifnot(
+  nrow(spei12_normalyr) == 772 * 8,
+  nrow(spei12_prodesyr) == 772 * 9,
+  !anyDuplicated(spei12_normalyr[c("codmun", "year")]),
+  !anyDuplicated(spei12_prodesyr[c("codmun", "year")])
+)
+
+# Provenance travels with the files
+for (spei_name in c("spei12_normalyr", "spei12_prodesyr")) {
+  spei_obj = get(spei_name)
+  attr(spei_obj, "source") = "Copernicus ERA5-Drought"
+  attr(spei_obj, "dataset_doi") = "10.24381/9bea5e16"
+  attr(spei_obj, "data_basis") = "ERA5 reanalysis"
+  attr(spei_obj, "pet_method") = "Penman-Monteith"
+  attr(spei_obj, "scale_months") = 12L
+  attr(spei_obj, "reference_period") = "1991-2020"
+  attr(spei_obj, "anchor_month") = if (spei_name == "spei12_normalyr") 12L else 7L
+  assign(spei_name, spei_obj)
+}
+
+saveRDS(spei12_normalyr, paste0(DV, "spei12_copernicus_era5_normalyr.RDS"))
+saveRDS(spei12_prodesyr, paste0(DV, "spei12_copernicus_era5_prodesyr.RDS"))
+
+rm(
+  spei_zip, spei_members, spei_tasks, spei_dir, spei_mun, spei_crs, spei_bbox,
+  spei_weighted_mean, extract_spei_file, spei_anchors, spei12_normalyr,
+  spei12_prodesyr, spei_name, spei_obj
+)
 ```
 
 ## 9. MORTALITY RATES
