@@ -89,7 +89,7 @@ data/raw/
 - The repository supplies all eighteen provider folders and the two CHC subfolders.
 - Raw provider files remain excluded except for `INCRA/Assentamento Brasil.zip` and `FBSP/amazon_factions_2023_2024.csv`.
 - The INCRA archive is included because its official download requires authenticated Brazilian gov.br credentials; the FBSP CSV is the hand-coded construction input.
-- Download the remaining inputs into the folders shown above. The pipeline stops before construction if any provider folder is missing or contains no input other than `.gitkeep`.
+- Download the remaining inputs into the folders shown above.
 
 > **Note for non-Portuguese speakers:** several datasets are hosted on Brazilian government portals whose interfaces are entirely in Portuguese. Step-by-step instructions in English are given for each of those.
 
@@ -597,7 +597,7 @@ Submit the request, download the resulting ZIP of monthly NetCDF files, and save
 
 ## 3. Steps to run
 
-1. **Install the packages** listed under Session info below.
+1. **Install the packages** listed under Required packages and session information below.
 2. **Download the raw data** per section 2 into `data/raw/<PROVIDER>/`.
 3. **Check `DATA_DIR` and `DRAW`** at the top of `work_dataframe.Rmd`, and `DATA_DIR` in `starlink_results.Rmd`. If the raw downloads already exist somewhere, point `DRAW` there instead of copying them. Nothing else needs editing.
 4. **Verify the pinned DETER input** is named `deter-amz-public-2025set01.zip` as specified in section 2.13; do not substitute another vintage.
@@ -607,29 +607,29 @@ Submit the request, download the resulting ZIP of monthly NetCDF files, and save
 To render from the included files, run only step 6. Steps 2, 4, and 5 are required only to rebuild the panels and processed spatial files.
 
 - Observed render time: about 4 minutes on a 24-core, 64 GB Windows machine.
-- Parallel limit: up to 16 workers by default, or one fewer than the available logical cores when fewer are available.
+- Parallel limit: up to 8 workers by default, or one fewer than the available logical cores when fewer are available.
 - Override: set `STARLINK_ROBUST_MAX_WORKERS`.
 - Memory: allow about 16 GB free; the main R session peaks near 14 GB and each worker uses about 110 MB.
 
 ## 4. Panel coverage and units
 
-- `dataset_normalyr.RDS` covers calendar years 2017–2024.
+- `dataset_normalyr.RDS` covers calendar years 2017–2024. Its mortality variables are used only in the appendix analyses.
 - `dataset_prodesyr.RDS` covers August–July PRODES years 2017–2025. `starlink_results.Rmd` reads this panel only in its appendix block.
 - The PRODES input is the administrative Legal Amazon product and excludes polygons smaller than 6.25 hectares. No observation after July 2025 enters either panel.
 - Mojuí dos Campos is merged into Santarém, reducing the 773 source polygons to 772 comparable municipal units.
 
-## 5. Session info
+## 5. Required packages and session information
 
-- The versions below were recorded on the machine that produced the included outputs.
-- Changes to the GEOS/GDAL versions used by `sf` can shift the municipal allocation of de-duplicated road length by about 0.1%; total length remains unchanged.
+Both notebooks print `sessionInfo()` at the end of their rendered output.
+The required package groups are:
 
 ```
 R 4.4.3 (Windows)
 
 Core:       tidyverse, sf, terra, exactextractr, lwgeom, units
-Estimation: fixest, ivDiag, lfe, broom, fastDummies
-Spatial:    spotoroo, spatstat.geom, spatstat.explore, surveillance, vegan
-IO:         haven, readxl, openxlsx, archive, tiff, httr, jsonlite
+Estimation: fixest, ivDiag, momentfit, broom, fastDummies
+Spatial:    spotoroo
+IO:         readxl, archive, httr, jsonlite
 Parallel:   future, future.apply, tictoc
 Output:     knitr, kableExtra, ggplot2, ggpubr, ggnewscale, patchwork, scales
 ```
@@ -639,17 +639,16 @@ Output:     knitr, kableExtra, ggplot2, ggpubr, ggnewscale, patchwork, scales
 
 ## 6. Notes on the data
 
-- `dataset_normalyr.RDS` has 103 columns, including current and one-year-lagged real soybean and cattle prices.
+- `dataset_normalyr.RDS` has 102 columns, including current and one-year-lagged real soybean and cattle prices.
 - `dataset_prodesyr.RDS` has 37 columns, including one-year-lagged real soybean and cattle prices.
-- The `.RDS` panels retain full variable names and are read by `starlink_results.Rmd`. The `.dta` copies use abbreviated names because Stata limits names to 32 characters.
-- MapBiomas extraction uses pixel counts and materializes the seven transition columns read by `starlink_results.Rmd`; see chunk 10 of the builder.
+- MapBiomas extraction uses pixel counts and materializes the seven transition columns read by `starlink_results.Rmd`; see chunk 8 of the builder.
 - The three map files under `data/processed/` retain municipal geometry, 2021 mobile-coverage geometry, and DETER polygons dissolved by municipality, year, and alert class.
-- The aggregated municipality-month and municipality-year DETER files cannot replace `deter_map.RDS` because they contain no polygon geometry.
+- The municipality-year DETER outcomes and pre-2022 fire-scar cross-section cannot replace `deter_map.RDS` because they contain no polygon geometry.
 
-Road de-duplication removes 3.9% of drivable road length:
+Paved-road de-duplication is applied before constructing municipal length:
 
 - Within each source, identical geometries with multiple road designations are counted once.
-- Across sources, a state segment is removed when it runs within 50 m of a federal line for at least 300 m.
+- Across sources, a state paved segment is removed when it runs within 50 m of a federal paved segment for at least 300 m.
 
 ## License
 
